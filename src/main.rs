@@ -82,31 +82,66 @@ fn interp<'a, R: 'a>(
 enum Yield<T> {
     Val(T),
     Gen(Box<FnBox(Rc<RefCell<Option<T>>>) -> Box<dyn Generator<Yield = Yield<T>, Return = T>>>),
+    Exec(Box<FnBox((Abort<T>, Next<T>)) -> ()>),
 }
 
-fn run_generator<'a, R: 'a, T, G: Generator<Yield = Yield<T>, Return = T>>(
-    gen: &mut G,
+type Abort<T> = Rc<Fn() -> Box<FnBox(T) -> ()>>;
+type Next<T> = Box<FnBox(T) -> ()>;
+
+fn run_generator<T: 'static, G: Generator<Yield = Yield<T>, Return = T> + 'static>(
+    gen: Rc<RefCell<G>>,
     arg: Rc<RefCell<Option<T>>>,
-    next: Box<FnBox(T) -> R + 'a>,
-) -> R {
-    match unsafe { gen.resume() } {
+    abort: Abort<T>,
+    next: Box<FnBox(T) -> ()>,
+) {
+    let result = unsafe { gen.borrow_mut().resume() };
+    match result {
         GeneratorState::Yielded(Yield::Val(v)) => {
             *arg.borrow_mut() = Some(v);
-            run_generator(gen, arg, next)
+            run_generator(gen, arg, abort, next)
         }
         GeneratorState::Yielded(Yield::Gen(gen_func)) => {
             let inner_arg = Rc::new(RefCell::new(None));
-            let mut inner_gen = gen_func(inner_arg.clone());
+            let inner_gen = Rc::new(RefCell::new(gen_func(inner_arg.clone())));
             run_generator(
-                &mut inner_gen,
+                inner_gen,
                 inner_arg,
-                Box::new(|result| {
+                abort.clone(),
+                Box::new(move |result| {
                     *arg.borrow_mut() = Some(result);
-                    run_generator(gen, arg, next)
+                    run_generator(gen, arg, abort, next)
                 }),
             )
         }
+        GeneratorState::Yielded(Yield::Exec(f)) => f((
+            abort.clone(),
+            Box::new(move |result| {
+                *arg.borrow_mut() = Some(result);
+                run_generator(gen, arg, abort, next)
+            }),
+        )),
         GeneratorState::Complete(r) => next(r),
+    }
+}
+
+fn start<
+    T: Clone + 'static,
+    G: Generator<Yield = Yield<T>, Return = T> + 'static,
+    F: FnOnce(Abort<T>) -> G + 'static,
+>(
+    arg: Rc<RefCell<T>>,
+    gen_func: F,
+) -> impl Generator<Yield = Yield<T>, Return = T> {
+    move || {
+        yield Yield::Exec(Box::new(move |(abort, next): (Abort<T>, Next<T>)| {
+            run_generator(
+                Rc::new(RefCell::new(gen_func(abort.clone()))),
+                Rc::new(RefCell::new(None)),
+                abort,
+                next,
+            )
+        }));
+        arg.borrow().clone()
     }
 }
 
@@ -175,11 +210,21 @@ fn main() {
 
     {
         let arg = Rc::new(RefCell::new(None));
-        run_generator(&mut greet(arg.clone(), "hoyoyo".into()), arg, printer());
+        run_generator(
+            Rc::new(RefCell::new(greet(arg.clone(), "hoyoyo".into()))),
+            arg,
+            Rc::new(|| printer()),
+            printer(),
+        );
     }
 
     {
         let arg = Rc::new(RefCell::new(None));
-        run_generator(&mut factorial(arg.clone(), 10), arg, printer());
+        run_generator(
+            Rc::new(RefCell::new(factorial(arg.clone(), 10))),
+            arg,
+            Rc::new(|| printer()),
+            printer(),
+        );
     }
 }
