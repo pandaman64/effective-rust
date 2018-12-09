@@ -6,26 +6,52 @@ mod eff;
 use crate::eff::*;
 
 #[derive(Debug)]
+struct Foo(u32);
+
+impl Effect for Foo {
+    type Output = u32;
+}
+
+#[derive(Debug)]
+struct Bar;
+
+impl Effect for Bar {
+    type Output = u32;
+}
+
+#[derive(Debug)]
 enum Effects {
-    Foo,
-    Bar,
+    F(Foo),
+    B(Bar),
+}
+
+impl From<Foo> for Effects {
+    fn from(f: Foo) -> Self {
+        Effects::F(f)
+    }
+}
+
+impl From<Bar> for Effects {
+    fn from(b: Bar) -> Self {
+        Effects::B(b)
+    }
 }
 
 fn expr_with_effect(channel: Channel) -> crate::eff::ExprWithEffect<Effects, u32> {
     Box::new(move || {
-        let v1: u32 = perform!(Effects::Foo, channel);
-        let v2 = perform!(Effects::Bar, channel, u32);
+        let v1: u32 = perform!(Foo(100), channel);
+        let v2 = perform!(Bar, channel, u32);
         v1 * v2
     })
 }
 
 fn main() {
     let result = handle(expr_with_effect, |eff, k| match eff {
-        Effects::Foo => {
+        Effects::F(f) => {
             println!("foo");
-            k.run(13_u32)
+            k.run(f.0 * 2)
         }
-        Effects::Bar => {
+        Effects::B(_b) => {
             println!("bar");
             k.run(4_u32)
         }

@@ -6,13 +6,16 @@ use std::rc::Rc;
 
 macro_rules! perform {
     ($eff:expr, $ch:expr) => {{
-        yield $eff;
-        $ch.get()
+        perform!($eff, $ch, _)
     }};
     ($eff:expr, $ch:expr, $ty:ty) => {{
-        yield $eff;
+        yield Into::into($eff);
         $ch.get::<$ty>()
     }};
+}
+
+pub trait Effect {
+    type Output;
 }
 
 pub type ExprWithEffect<E, T> = Box<Generator<Yield = E, Return = T>>;
