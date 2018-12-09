@@ -39,9 +39,9 @@ impl From<Bar> for Effects {
 
 fn expr_with_effect(channel: Channel) -> crate::eff::ExprWithEffect<Effects, char> {
     Box::new(move || {
-        let v1: usize = perform!(Foo(2), channel);
-        let v2 = perform!(Bar, channel, String);
-        v2.chars().skip(v1).next().unwrap()
+        let index = perform!(Foo(2), channel);
+        let s = perform!(Bar, channel);
+        s.chars().nth(index).unwrap()
     })
 }
 
@@ -49,11 +49,11 @@ fn main() {
     let result = handle(expr_with_effect, |eff, k| match eff {
         Effects::F(f) => {
             println!("foo");
-            k.run::<<Foo as Effect>::Output>(f.0 * 2)
+            k.run::<Foo>(f.0 * 2)
         }
         Effects::B(_b) => {
             println!("bar");
-            k.run::<<Bar as Effect>::Output>("Hello, World!".into())
+            k.run::<Bar>("Hello, World!".into())
         }
     });
 

@@ -1,21 +1,22 @@
 use std::any::Any;
 use std::cell::RefCell;
-use std::fmt::Debug;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
 
 macro_rules! perform {
     ($eff:expr, $ch:expr) => {{
-        perform!($eff, $ch, _)
-    }};
-    ($eff:expr, $ch:expr, $ty:ty) => {{
+        #[inline(always)]
+        fn __getter<T: Effect>(_: &T, channel: Channel) -> impl FnOnce() -> <T as Effect>::Output {
+            move || channel.get()
+        }
+        let getter = __getter(&$eff, $ch.clone());
         yield Into::into($eff);
-        $ch.get::<$ty>()
+        getter()
     }};
 }
 
 pub trait Effect {
-    type Output;
+    type Output: Any;
 }
 
 pub type ExprWithEffect<E, T> = Box<Generator<Yield = E, Return = T>>;
@@ -30,18 +31,12 @@ impl Channel {
         Default::default()
     }
 
-    pub fn set<T: Any + Debug>(&self, v: T) {
-        println!("setting {:?} of type {}", v, unsafe {
-            std::intrinsics::type_name::<T>()
-        });
+    pub fn set<T: Any>(&self, v: T) {
         *self.inner.borrow_mut() = Some(Box::new(v));
     }
 
-    pub fn get<T: Any + Debug>(&self) -> T {
+    pub fn get<T: Any>(&self) -> T {
         let value = self.inner.borrow_mut().take().unwrap();
-        println!("getting of type {}", unsafe {
-            std::intrinsics::type_name::<T>()
-        });
         *value.downcast().unwrap()
     }
 }
@@ -61,7 +56,7 @@ pub struct Continuation<'h, E, T> {
 }
 
 impl<'h, E, T> Continuation<'h, E, T> {
-    pub fn run<V: 'static + Any + Debug>(self, v: V) -> T {
+    pub fn run<ConcreteEff: Effect>(self, v: ConcreteEff::Output) -> T {
         self.channel.set(v);
         _handle(self.channel, self.expr, self.handler)
     }
