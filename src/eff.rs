@@ -146,3 +146,28 @@ where
     let expr = gen_func(channel.clone());
     _handle(channel, expr, &handler)
 }
+
+macro_rules! handler {
+    ( $($name:ident ( $eff:pat, $k:pat ) => $e:expr ),* ) => {{
+        enum Effects {
+            $($name($name),)*
+        }
+
+        $(
+            impl From<$name> for Effects {
+                fn from(v: $name) -> Self {
+                    Effects::$name(v)
+                }
+            }
+        )*
+
+        |eff: Effects, k| match eff {
+            $(
+                Effects::$name($eff) => {
+                    let $k = k;
+                    $e
+                }
+            )*
+        }
+    }};
+}
