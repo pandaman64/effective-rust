@@ -3,14 +3,70 @@ use std::cell::RefCell;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
 
-macro_rules! perform {
-    ($eff:expr, $ch:expr) => {{
+// https://users.rust-lang.org/t/macro-to-replace-type-parameters/17903
+macro_rules! eff {
+    // Open parenthesis.
+    (@$ctx:ident, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
+        eff!(@$ctx, @(() $($stack)*) $($first)* __paren $($rest)*)
+    };
+
+    // Open square bracket.
+    (@$ctx:ident, @($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
+        eff!(@$ctx, @(() $($stack)*) $($first)* __bracket $($rest)*)
+    };
+
+    // Open brace.
+    (@$ctx:ident, @($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
+        eff!(@$ctx, @(() $($stack)*) $($first)* __brace $($rest)*)
+    };
+
+    // Close parenthesis.
+    (@$ctx:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
+        eff!(@$ctx, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
+    };
+
+    // Close square bracket.
+    (@$ctx:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
+        eff!(@$ctx, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
+    };
+
+    // Close brace.
+    (@$ctx:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
+        eff!(@$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
+    };
+
+    // Replace `perform!($e)` tokens with `perform_impl!(@$ctx, $e)`.
+    (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) perform!($e:expr) $($rest:tt)*) => {
+        eff!(@$ctx, @(($($top)* perform_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
+    };
+
+    // Munch a token that is not `perform!`.
+    (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
+        eff!(@$ctx, @(($($top)* $first) $($stack)*) $($rest)*)
+    };
+
+    // Done.
+    (@$ctx:ident, @(($($top:tt)+))) => {{
+        $($top)+
+    }};
+
+    // Begin with an empty stack.
+    ($($input:tt)+) => {
+        |channel: Channel| {
+            Box::new(move || { eff!(@channel, @(()) $($input)*) }) as ExprWithEffect<_, _>
+        }
+    };
+}
+
+macro_rules! perform_impl {
+    (@$ch:ident, $eff:expr) => {{
         #[inline(always)]
         fn __getter<T: Effect>(_: &T, channel: Channel) -> impl FnOnce() -> <T as Effect>::Output {
             move || channel.get()
         }
-        let getter = __getter(&$eff, $ch.clone());
-        yield Into::into($eff);
+        let eff = $eff;
+        let getter = __getter(&eff, $ch.clone());
+        yield Into::into(eff);
         getter()
     }};
 }

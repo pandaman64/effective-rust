@@ -1,5 +1,6 @@
 #![feature(fnbox, nll, generators, generator_trait)]
 #![feature(get_type_id, core_intrinsics)]
+#![feature(trace_macros)]
 
 #[macro_use]
 mod eff;
@@ -37,15 +38,13 @@ impl From<Bar> for Effects {
     }
 }
 
-fn expr_with_effect(channel: Channel) -> crate::eff::ExprWithEffect<Effects, char> {
-    Box::new(move || {
-        let index = perform!(Foo(2), channel);
-        let s = perform!(Bar, channel);
-        s.chars().nth(index).unwrap()
-    })
-}
-
 fn main() {
+    let expr_with_effect = eff! {
+        let index = perform!(Foo(2));
+        let s = perform!(Bar);
+        s.chars().nth(index).unwrap()
+    };
+
     let result = handle(expr_with_effect, |eff, k| match eff {
         Effects::F(f) => {
             println!("foo");
