@@ -54,6 +54,17 @@ impl<'h, T> Continuation<'h, T> {
     }
 }
 
+macro_rules! perform {
+    ($eff:expr, $ch:expr) => {{
+        yield $eff;
+        $ch.get()
+    }};
+    ($eff:expr, $ch:expr, $ty:ty) => {{
+        yield $eff;
+        $ch.get::<$ty>()
+    }};
+}
+
 #[derive(Debug)]
 enum Effect {
     Foo,
@@ -64,18 +75,8 @@ type ExprWithEffect<T> = Box<Generator<Yield = Effect, Return = T>>;
 
 fn expr_with_effect(channel: Channel) -> ExprWithEffect<u32> {
     Box::new(move || {
-        let v1 =
-        // perform Effect::Foo
-        {
-            yield Effect::Foo;
-            channel.get::<u32>()
-        };
-        let v2 =
-        // perform Effect::Bar
-        {
-            yield Effect::Bar;
-            channel.get::<u32>()
-        };
+        let v1: u32 = perform!(Effect::Foo, channel);
+        let v2 = perform!(Effect::Bar, channel, u32);
         v1 * v2
     })
 }
@@ -104,7 +105,7 @@ where
     G: FnOnce(Channel) -> ExprWithEffect<T>,
     H: Fn(Effect, Continuation<T>) -> T,
 {
-    let channel = Channel::default();
+    let channel = Channel::new();
     let expr = gen_func(channel.clone());
     _handle(channel, expr, &handler)
 }
