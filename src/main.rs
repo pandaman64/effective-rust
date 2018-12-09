@@ -6,17 +6,17 @@ mod eff;
 use crate::eff::*;
 
 #[derive(Debug)]
-struct Foo(u32);
+struct Foo(usize);
 
 impl Effect for Foo {
-    type Output = u32;
+    type Output = usize;
 }
 
 #[derive(Debug)]
 struct Bar;
 
 impl Effect for Bar {
-    type Output = u32;
+    type Output = String;
 }
 
 #[derive(Debug)]
@@ -37,11 +37,11 @@ impl From<Bar> for Effects {
     }
 }
 
-fn expr_with_effect(channel: Channel) -> crate::eff::ExprWithEffect<Effects, u32> {
+fn expr_with_effect(channel: Channel) -> crate::eff::ExprWithEffect<Effects, char> {
     Box::new(move || {
-        let v1: u32 = perform!(Foo(100), channel);
-        let v2 = perform!(Bar, channel, u32);
-        v1 * v2
+        let v1: usize = perform!(Foo(2), channel);
+        let v2 = perform!(Bar, channel, String);
+        v2.chars().skip(v1).next().unwrap()
     })
 }
 
@@ -53,7 +53,7 @@ fn main() {
         }
         Effects::B(_b) => {
             println!("bar");
-            k.run(4_u32)
+            k.run("Hello, World!".to_string())
         }
     });
 
