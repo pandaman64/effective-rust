@@ -49,11 +49,11 @@ fn main() {
     let result = handle(expr_with_effect, |eff, k| match eff {
         Effects::F(f) => {
             println!("foo");
-            k.run(f.0 * 2)
+            k.run::<<Foo as Effect>::Output>(f.0 * 2)
         }
         Effects::B(_b) => {
             println!("bar");
-            k.run("Hello, World!".to_string())
+            k.run::<<Bar as Effect>::Output>("Hello, World!".into())
         }
     });
 
