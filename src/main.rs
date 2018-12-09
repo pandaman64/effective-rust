@@ -5,7 +5,10 @@ mod eff;
 use crate::eff::*;
 
 #[derive(Debug)]
-struct Foo(usize);
+enum Foo {
+    This(usize),
+    That(usize),
+}
 impl Effect for Foo {
     type Output = usize;
 }
@@ -24,18 +27,24 @@ impl Effect for Baz {
 
 fn main() {
     let expr_with_effect = eff! {
-        let index = perform!(Foo(2));
+        let i1 = perform!(Foo::This(1));
+        let i2 = perform!(Foo::That(3));
         let s = perform!(Bar);
-        perform!(Baz);
-        s.chars().nth(index).unwrap()
+        if i1 + i2 >= s.len() {
+            perform!(Baz);
+        }
+        s.chars().nth(i1 + i2).unwrap()
     };
 
     let result = handle(
         expr_with_effect,
         handler! {
-            Foo(Foo(idx), k) => {
+            Foo(foo, k) => {
                 println!("foo");
-                k.run::<Foo>(idx * 2)
+                match foo {
+                    Foo::This(idx) => k.run::<Foo>(idx * 2),
+                    Foo::That(idx) => k.run::<Foo>(idx - 1),
+                }
             },
             Bar(_eff, k) => {
                 println!("bar");
