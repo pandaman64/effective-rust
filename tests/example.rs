@@ -1,9 +1,7 @@
-#![feature(fnbox, nll, generators, generator_trait, never_type)]
-#![feature(trace_macros)]
+#![feature(generators, never_type)]
 
-#[macro_use]
-mod eff;
-use crate::eff::*;
+extern crate eff;
+use eff::*;
 
 #[derive(Debug)]
 enum Foo {
@@ -28,7 +26,8 @@ mod effects {
     }
 }
 
-fn main() {
+#[test]
+fn test_example() {
     let expr_with_effect = eff! {
         let i1 = perform!(Foo::This(1));
         let i2 = perform!(Foo::That(3));
@@ -60,5 +59,5 @@ fn main() {
         },
     );
 
-    println!("{}", result);
+    assert_eq!(result, 'o');
 }

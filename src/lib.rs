@@ -1,9 +1,13 @@
+#![feature(fnbox, nll, generators, generator_trait)]
+#![feature(trace_macros)]
+
 use std::any::Any;
 use std::cell::RefCell;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
 
 // https://users.rust-lang.org/t/macro-to-replace-type-parameters/17903
+#[macro_export]
 macro_rules! eff {
     // Open parenthesis.
     (@$ctx:ident, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
@@ -58,6 +62,7 @@ macro_rules! eff {
     };
 }
 
+#[macro_export]
 macro_rules! perform_impl {
     (@$ch:ident, $eff:expr) => {{
         #[inline(always)]
@@ -147,6 +152,7 @@ where
     _handle(channel, expr, &handler)
 }
 
+#[macro_export]
 macro_rules! handler {
     ( $($variant:ident @ $eff_type:ty [ $eff:pat, $k:pat ] => $e:expr),* ) => {{
         enum Effects {

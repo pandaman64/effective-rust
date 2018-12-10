@@ -1,5 +1,5 @@
 [package]
-name = "cps"
+name = "eff"
 version = "0.1.0"
 authors = ["pan"]
 edition = "2018"
