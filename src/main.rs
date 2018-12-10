@@ -1,4 +1,5 @@
 #![feature(fnbox, nll, generators, generator_trait, never_type)]
+#![feature(trace_macros)]
 
 #[macro_use]
 mod eff;
@@ -19,10 +20,12 @@ impl Effect for Bar {
     type Output = String;
 }
 
-#[derive(Debug)]
-struct Baz;
-impl Effect for Baz {
-    type Output = !;
+mod effects {
+    #[derive(Debug)]
+    pub struct Baz;
+    impl super::Effect for Baz {
+        type Output = !;
+    }
 }
 
 fn main() {
@@ -31,7 +34,7 @@ fn main() {
         let i2 = perform!(Foo::That(3));
         let s = perform!(Bar);
         if i1 + i2 >= s.len() {
-            perform!(Baz);
+            perform!(effects::Baz);
         }
         s.chars().nth(i1 + i2).unwrap()
     };
@@ -39,18 +42,18 @@ fn main() {
     let result = handle(
         expr_with_effect,
         handler! {
-            Foo(foo, k) => {
+            A @ Foo[foo, k] => {
                 println!("foo");
                 match foo {
                     Foo::This(idx) => k.run::<Foo>(idx * 2),
                     Foo::That(idx) => k.run::<Foo>(idx - 1),
                 }
             },
-            Bar(_eff, k) => {
+            B @ Bar[_eff, k] => {
                 println!("bar");
                 k.run::<Bar>("Hello, World!".into())
             },
-            Baz(_eff, _k) => {
+            C @ effects::Baz[_eff, _k] => {
                 println!("baz");
                 'x'
             }

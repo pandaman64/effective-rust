@@ -148,22 +148,22 @@ where
 }
 
 macro_rules! handler {
-    ( $($name:ident ( $eff:pat, $k:pat ) => $e:expr ),* ) => {{
+    ( $($variant:ident @ $eff_type:ty [ $eff:pat, $k:pat ] => $e:expr),* ) => {{
         enum Effects {
-            $($name($name),)*
+            $($variant($eff_type),)*
         }
 
         $(
-            impl From<$name> for Effects {
-                fn from(v: $name) -> Self {
-                    Effects::$name(v)
+            impl From<$eff_type> for Effects {
+                fn from(v: $eff_type) -> Self {
+                    Effects::$variant(v)
                 }
             }
         )*
 
         |eff: Effects, k| match eff {
             $(
-                Effects::$name($eff) => {
+                Effects::$variant($eff) => {
                     let $k = k;
                     $e
                 }
