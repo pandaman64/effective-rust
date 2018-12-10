@@ -57,7 +57,7 @@ macro_rules! eff {
     // Begin with an empty stack.
     ($($input:tt)+) => {
         |channel: Channel| {
-            Box::new(move || { eff!(@channel, @(()) $($input)*) }) as ExprWithEffect<_, _>
+            Box::new(move || { eff!(@channel, @(()) $($input)*) }) as WithEffect<_, _>
         }
     };
 }
@@ -80,7 +80,7 @@ pub trait Effect {
     type Output: Any;
 }
 
-pub type ExprWithEffect<E, T> = Box<Generator<Yield = E, Return = T>>;
+pub type WithEffect<E, T> = Box<Generator<Yield = E, Return = T>>;
 
 #[derive(Debug, Default)]
 pub struct Channel {
@@ -111,7 +111,7 @@ impl Clone for Channel {
 }
 
 pub struct Continuation<'h, E, T> {
-    expr: ExprWithEffect<E, T>,
+    expr: WithEffect<E, T>,
     channel: Channel,
     handler: &'h Fn(E, Continuation<E, T>) -> T,
 }
@@ -125,7 +125,7 @@ impl<'h, E, T> Continuation<'h, E, T> {
 
 fn _handle<E, T>(
     channel: Channel,
-    mut expr: ExprWithEffect<E, T>,
+    mut expr: WithEffect<E, T>,
     handler: &Fn(E, Continuation<E, T>) -> T,
 ) -> T {
     let state = unsafe { expr.resume() };
@@ -144,7 +144,7 @@ fn _handle<E, T>(
 
 pub fn handle<E, T, H, G, VH, R>(gen_func: G, value_handler: VH, handler: H) -> R
 where
-    G: FnOnce(Channel) -> ExprWithEffect<E, T>,
+    G: FnOnce(Channel) -> WithEffect<E, T>,
     H: Fn(E, Continuation<E, T>) -> T,
     VH: FnOnce(T) -> R,
 {
