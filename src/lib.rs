@@ -142,14 +142,15 @@ fn _handle<E, T>(
     }
 }
 
-pub fn handle<E, T, H, G>(gen_func: G, handler: H) -> T
+pub fn handle<E, T, H, G, VH, R>(gen_func: G, value_handler: VH, handler: H) -> R
 where
     G: FnOnce(Channel) -> ExprWithEffect<E, T>,
     H: Fn(E, Continuation<E, T>) -> T,
+    VH: FnOnce(T) -> R,
 {
     let channel = Channel::new();
     let expr = gen_func(channel.clone());
-    _handle(channel, expr, &handler)
+    value_handler(_handle(channel, expr, &handler))
 }
 
 #[macro_export]

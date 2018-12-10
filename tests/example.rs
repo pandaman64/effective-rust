@@ -40,6 +40,7 @@ fn test_example() {
 
     let result = handle(
         expr_with_effect,
+        |x| x,
         handler! {
             A @ Foo[foo, k] => {
                 println!("foo");
