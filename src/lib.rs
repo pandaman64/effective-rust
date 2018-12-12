@@ -2,6 +2,7 @@
 #![feature(trace_macros)]
 
 use std::any::Any;
+use std::boxed::FnBox;
 use std::cell::RefCell;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
@@ -44,7 +45,12 @@ macro_rules! eff {
         eff!(@$ctx, @(($($top)* perform_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
     };
 
-    // Munch a token that is not `perform!`.
+    // Replace `invoke!($e)` tokens with `invoke_impl!(@$ctx, $e)`.
+    (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) invoke!($e:expr) $($rest:tt)*) => {
+        eff!(@$ctx, @(($($top)* invoke_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
+    };
+
+    // Munch a token that is not `perform!` nor `invoke!`.
     (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
         eff!(@$ctx, @(($($top)* $first) $($stack)*) $($rest)*)
     };
@@ -56,11 +62,13 @@ macro_rules! eff {
 
     // Begin with an empty stack.
     ($($input:tt)+) => {{
-        |context: Context<_, _>| -> WithEffect<_, _> {
-            WithEffect {
-                inner: Box::new(move || { eff!(@context, @(()) $($input)*) })
+        Box::new(|context: Context<_, _>| -> WithEffectInner<_, _> {
+            WithEffectInner {
+                inner: Box::new(move || {
+                    eff!(@context, @(()) $($input)*)
+                })
             }
-        }
+        })
     }};
 }
 
@@ -78,15 +86,24 @@ macro_rules! perform_impl {
     }};
 }
 
+#[macro_export]
+macro_rules! invoke_impl {
+    (@$ch:ident, $eff:expr) => {{
+        $eff($ch.clone()).invoke($ch.clone())
+    }};
+}
+
+pub type WithEffect<E, T> = Box<FnBox(Context<E, T>) -> WithEffectInner<E, T>>;
+
 pub trait Effect {
     type Output: Any;
 }
 
-pub struct WithEffect<E, T> {
+pub struct WithEffectInner<E, T> {
     pub inner: Box<Generator<Yield = E, Return = T>>,
 }
 
-impl<E, T> WithEffect<E, T> {
+impl<E, T> WithEffectInner<E, T> {
     pub fn invoke(self, context: Context<E, T>) -> T {
         _handle(context, self)
     }
@@ -135,7 +152,7 @@ impl<E, T> Clone for Context<E, T> {
 }
 
 pub struct Continuation<E, T> {
-    expr: WithEffect<E, T>,
+    expr: WithEffectInner<E, T>,
     context: Context<E, T>,
 }
 
@@ -146,7 +163,7 @@ impl<E, T> Continuation<E, T> {
     }
 }
 
-fn _handle<E, T>(context: Context<E, T>, mut expr: WithEffect<E, T>) -> T {
+fn _handle<E, T>(context: Context<E, T>, mut expr: WithEffectInner<E, T>) -> T {
     let state = unsafe { expr.inner.resume() };
     match state {
         GeneratorState::Yielded(effect) => {
@@ -157,9 +174,12 @@ fn _handle<E, T>(context: Context<E, T>, mut expr: WithEffect<E, T>) -> T {
     }
 }
 
-pub fn handle<E, T, H, G, VH, R>(gen_func: G, value_handler: VH, handler: H) -> R
+pub fn handle<E, T, H, VH, R>(
+    gen_func: Box<FnBox(Context<E, T>) -> WithEffectInner<E, T>>,
+    value_handler: VH,
+    handler: H,
+) -> R
 where
-    G: FnOnce(Context<E, T>) -> WithEffect<E, T>,
     H: Fn(E, Continuation<E, T>) -> T + 'static,
     VH: FnOnce(T) -> R,
 {

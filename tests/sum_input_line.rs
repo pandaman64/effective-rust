@@ -9,24 +9,38 @@ impl Effect for ConversionError {
     type Output = usize;
 }
 
-// TODO: remove 'static
-fn sum_up(s: &'static str) -> usize {
+struct Exit(usize);
+impl Effect for Exit {
+    type Output = usize;
+}
+
+fn parse<E: From<ConversionError> + 'static>(line: String) -> WithEffect<E, usize> {
+    eff! {
+        match line.parse() {
+            Ok(x) => x,
+            Err(_) => perform!(ConversionError(line.to_string())),
+        }
+    }
+}
+
+fn sum_up(s: String) -> usize {
     handle(
         eff! {
             let mut sum = 0_usize;
             for line in s.split('\n') {
-                sum += match line.parse() {
-                    Ok(x) => x,
-                    Err(_) => perform!(ConversionError(s.to_string())),
-                };
+                sum += invoke!(parse(line.to_string()));
             }
-            sum
+            perform!(Exit(sum));
+            unreachable!()
         },
         |x| x,
         handler! {
             A @ ConversionError[eff, k] => {
                 println!("conversion error: {}", eff.0);
                 k.run::<ConversionError>(0)
+            },
+            B @ Exit[Exit(x), _k] => {
+                x
             }
         },
     )
@@ -44,5 +58,5 @@ foo
 
 "#;
 
-    assert_eq!(sum_up(lines), 15);
+    assert_eq!(sum_up(lines.to_string()), 15);
 }
