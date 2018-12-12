@@ -74,13 +74,13 @@ macro_rules! eff {
 
 #[macro_export]
 macro_rules! perform_impl {
-    (@$ch:ident, $eff:expr) => {{
+    (@$ctx:ident, $eff:expr) => {{
         #[inline(always)]
         fn __getter<T: Effect>(_: &T, channel: Channel) -> impl FnOnce() -> <T as Effect>::Output {
             move || channel.get()
         }
         let eff = $eff;
-        let getter = __getter(&eff, $ch.channel.clone());
+        let getter = __getter(&eff, $ctx.channel.clone());
         yield Into::into(eff);
         getter()
     }};
@@ -88,8 +88,8 @@ macro_rules! perform_impl {
 
 #[macro_export]
 macro_rules! invoke_impl {
-    (@$ch:ident, $eff:expr) => {{
-        $eff($ch.clone()).invoke($ch.clone())
+    (@$ctx:ident, $eff:expr) => {{
+        $eff($ctx.clone()).invoke($ctx.clone())
     }};
 }
 
