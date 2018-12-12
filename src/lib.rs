@@ -55,11 +55,13 @@ macro_rules! eff {
     }};
 
     // Begin with an empty stack.
-    ($($input:tt)+) => {
-        |channel: Channel| {
-            Box::new(move || { eff!(@channel, @(()) $($input)*) }) as WithEffect<_, _>
+    ($($input:tt)+) => {{
+        |context: Context<_, _>| -> WithEffect<_, _> {
+            WithEffect {
+                inner: Box::new(move || { eff!(@context, @(()) $($input)*) })
+            }
         }
-    };
+    }};
 }
 
 #[macro_export]
@@ -70,7 +72,7 @@ macro_rules! perform_impl {
             move || channel.get()
         }
         let eff = $eff;
-        let getter = __getter(&eff, $ch.clone());
+        let getter = __getter(&eff, $ch.channel.clone());
         yield Into::into(eff);
         getter()
     }};
@@ -80,11 +82,19 @@ pub trait Effect {
     type Output: Any;
 }
 
-pub type WithEffect<E, T> = Box<Generator<Yield = E, Return = T>>;
+pub struct WithEffect<E, T> {
+    pub inner: Box<Generator<Yield = E, Return = T>>,
+}
+
+impl<E, T> WithEffect<E, T> {
+    pub fn invoke(self, context: Context<E, T>) -> T {
+        _handle(context, self)
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct Channel {
-    inner: Rc<RefCell<Option<Box<dyn Any>>>>,
+    pub inner: Rc<RefCell<Option<Box<dyn Any>>>>,
 }
 
 impl Channel {
@@ -110,47 +120,55 @@ impl Clone for Channel {
     }
 }
 
-pub struct Continuation<'h, E, T> {
-    expr: WithEffect<E, T>,
-    channel: Channel,
-    handler: &'h Fn(E, Continuation<E, T>) -> T,
+pub struct Context<E, T> {
+    pub channel: Channel,
+    pub handler: Rc<Fn(E, Continuation<E, T>) -> T>,
 }
 
-impl<'h, E, T> Continuation<'h, E, T> {
-    pub fn run<ConcreteEff: Effect>(self, v: ConcreteEff::Output) -> T {
-        self.channel.set(v);
-        _handle(self.channel, self.expr, self.handler)
+impl<E, T> Clone for Context<E, T> {
+    fn clone(&self) -> Self {
+        Context {
+            channel: self.channel.clone(),
+            handler: self.handler.clone(),
+        }
     }
 }
 
-fn _handle<E, T>(
-    channel: Channel,
-    mut expr: WithEffect<E, T>,
-    handler: &Fn(E, Continuation<E, T>) -> T,
-) -> T {
-    let state = unsafe { expr.resume() };
+pub struct Continuation<E, T> {
+    expr: WithEffect<E, T>,
+    context: Context<E, T>,
+}
+
+impl<E, T> Continuation<E, T> {
+    pub fn run<ConcreteEff: Effect>(self, v: ConcreteEff::Output) -> T {
+        self.context.channel.set(v);
+        _handle(self.context, self.expr)
+    }
+}
+
+fn _handle<E, T>(context: Context<E, T>, mut expr: WithEffect<E, T>) -> T {
+    let state = unsafe { expr.inner.resume() };
     match state {
-        GeneratorState::Yielded(effect) => handler(
-            effect,
-            Continuation {
-                expr,
-                channel,
-                handler,
-            },
-        ),
+        GeneratorState::Yielded(effect) => {
+            let handler = context.handler.clone();
+            handler(effect, Continuation { expr, context })
+        }
         GeneratorState::Complete(v) => v,
     }
 }
 
 pub fn handle<E, T, H, G, VH, R>(gen_func: G, value_handler: VH, handler: H) -> R
 where
-    G: FnOnce(Channel) -> WithEffect<E, T>,
-    H: Fn(E, Continuation<E, T>) -> T,
+    G: FnOnce(Context<E, T>) -> WithEffect<E, T>,
+    H: Fn(E, Continuation<E, T>) -> T + 'static,
     VH: FnOnce(T) -> R,
 {
-    let channel = Channel::new();
-    let expr = gen_func(channel.clone());
-    value_handler(_handle(channel, expr, &handler))
+    let context = Context {
+        channel: Channel::new(),
+        handler: Rc::new(handler),
+    };
+    let expr = gen_func(context.clone());
+    value_handler(_handle(context, expr))
 }
 
 #[macro_export]
