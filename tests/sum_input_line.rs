@@ -1,3 +1,5 @@
+//! 1.1. Recovering from errors
+
 #![feature(generators, never_type)]
 
 extern crate eff;
