@@ -11,11 +11,6 @@ impl Effect for ConversionError {
     type Output = usize;
 }
 
-struct Exit(usize);
-impl Effect for Exit {
-    type Output = usize;
-}
-
 fn parse<E: From<ConversionError> + 'static>(line: String) -> WithEffect<E, usize> {
     eff! {
         match line.parse() {
@@ -32,17 +27,13 @@ fn sum_up(s: String) -> usize {
             for line in s.split('\n') {
                 sum += invoke!(parse(line.to_string()));
             }
-            perform!(Exit(sum));
-            unreachable!()
+            sum
         },
         |x| x,
         handler! {
             A @ ConversionError[eff, k] => {
                 println!("conversion error: {}", eff.0);
                 k.run::<ConversionError>(0)
-            },
-            B @ Exit[Exit(x), _k] => {
-                x
             }
         },
     )

@@ -64,9 +64,17 @@ macro_rules! eff {
     ($($input:tt)+) => {{
         Box::new(|context: Context<_, _>| -> WithEffectInner<_, _> {
             WithEffectInner {
-                inner: Box::new(move || {
-                    eff!(@context, @(()) $($input)*)
-                })
+                inner: Box::new(
+                    #[allow(unreachable_code)]
+                    move || {
+                        // This trick have the compiler treat this closure
+                        // as a generator if $input doesn't contain no generator
+                        // (no yield).
+                        // see: https://stackoverflow.com/a/53757228/8554666
+                        if false { yield unreachable!(); }
+                        eff!(@context, @(()) $($input)*)
+                    }
+                )
             }
         })
     }};
