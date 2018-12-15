@@ -171,7 +171,7 @@ impl<C> Default for Channel<C> {
 
 pub struct Context<E, T, C> {
     pub channel: Channel<C>,
-    pub handler: Rc<Fn(E, Continuation<E, T, C>) -> T>,
+    pub handler: Rc<RefCell<FnMut(E) -> HandlerResult<T, C>>>,
 }
 
 impl<E, T, C> Clone for Context<E, T, C> {
@@ -183,26 +183,19 @@ impl<E, T, C> Clone for Context<E, T, C> {
     }
 }
 
-pub struct Continuation<E, T, C> {
-    expr: WithEffectInner<E, T>,
-    context: Context<E, T, C>,
-}
-
-impl<E, T, C> Continuation<E, T, C> {
-    pub fn run(self, v: C) -> T {
-        self.context.channel.set(v);
-        _handle(self.context, self.expr)
-    }
-}
-
 fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) -> T {
-    let state = unsafe { expr.inner.resume() };
-    match state {
-        GeneratorState::Yielded(effect) => {
-            let handler = context.handler.clone();
-            handler(effect, Continuation { expr, context })
+    loop {
+        let state = unsafe { expr.inner.resume() };
+        match state {
+            GeneratorState::Yielded(effect) => {
+                let handler = &mut *context.handler.borrow_mut();
+                match handler(effect) {
+                    HandlerResult::Resume(c) => context.channel.set(c),
+                    HandlerResult::Exit(v) => return v,
+                }
+            }
+            GeneratorState::Complete(v) => return v,
         }
-        GeneratorState::Complete(v) => v,
     }
 }
 
@@ -212,15 +205,20 @@ pub fn handle<E, T, C, H, VH, R>(
     handler: H,
 ) -> R
 where
-    H: Fn(E, Continuation<E, T, C>) -> T + 'static,
+    H: FnMut(E) -> HandlerResult<T, C> + 'static,
     VH: FnOnce(T) -> R,
 {
     let context = Context {
         channel: Channel::new(),
-        handler: Rc::new(handler),
+        handler: Rc::new(RefCell::new(handler)),
     };
     let expr = gen_func(context.clone());
     value_handler(_handle(context, expr))
+}
+
+pub enum HandlerResult<T, C> {
+    Resume(C),
+    Exit(T),
 }
 
 #[macro_export]
@@ -274,7 +272,8 @@ macro_rules! handler_muncher {
 #[macro_export]
 macro_rules! resume_impl {
     (@$channel:ident, @$variant:ident, @$ctx:ty, $k:expr, $e:expr) => {{
-        $k.run($channel::$variant($e))
+        return $crate::HandlerResult::Resume($channel::$variant($e));
+        unreachable!()
     }};
 }
 
@@ -308,11 +307,11 @@ macro_rules! handler {
             }
         )*
 
-        move |eff: Effects, k| match eff {
+        #[allow(unreachable_code)]
+        move |eff: Effects| match eff {
             $(
                 Effects::$variant($eff) => {
-                    let $k = k;
-                    handler_muncher!(@Channel, @$variant, @$eff_type, @(()) $e)
+                    $crate::HandlerResult::Exit(handler_muncher!(@Channel, @$variant, @$eff_type, @(()) $e))
                 }
             )*
         }

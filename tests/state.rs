@@ -6,7 +6,6 @@ extern crate eff;
 use eff::*;
 
 use std::boxed::FnBox;
-use std::cell::RefCell;
 
 struct GetInt;
 impl Effect for GetInt {
@@ -35,8 +34,8 @@ impl Effect for SetStr {
 
 #[test]
 fn test_state() {
-    let i = RefCell::new(42_u32);
-    let s = RefCell::new("hello".to_string());
+    let mut i = 42;
+    let mut s = "hello".to_string();
     handle(
         eff! {
             println!("{}", perform!(GetInt));
@@ -51,30 +50,21 @@ fn test_state() {
         |x| x,
         handler! {
             GI @ GetInt[_, k] => {
-                let x = *i.borrow();
-                resume!(k, x)
+                resume!(k, i)
             },
             SI @ SetInt[SetInt(x), k] => {
-                {
-                    *i.borrow_mut() = x;
-                }
+                i = x;
                 resume!(k, ())
             },
             UI @ UpdateInt[UpdateInt(f), k] => {
-                {
-                    let mut addr = i.borrow_mut();
-                    *addr = f(*addr);
-                }
+                i = f(i);
                 resume!(k, ())
             },
             GS @ GetStr[_, k] => {
-                let s = s.borrow().clone();
-                resume!(k, s)
+                resume!(k, s.clone())
             },
             SS @ SetStr[SetStr(x), k] => {
-                {
-                    *s.borrow_mut() = x;
-                }
+                s = x;
                 resume!(k, ())
             }
         },
