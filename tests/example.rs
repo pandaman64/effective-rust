@@ -45,13 +45,13 @@ fn test_example() {
             A @ Foo[foo, k] => {
                 println!("foo");
                 match foo {
-                    Foo::This(idx) => k.run::<Foo>(idx * 2),
-                    Foo::That(idx) => k.run::<Foo>(idx - 1),
+                    Foo::This(idx) => resume!(k, idx * 2),
+                    Foo::That(idx) => resume!(k, idx - 1),
                 }
             },
             B @ Bar[_eff, k] => {
                 println!("bar");
-                k.run::<Bar>("Hello, World!".into())
+                resume!(k, "Hello, World!".into())
             },
             C @ effects::Baz[_eff, _k] => {
                 println!("baz");

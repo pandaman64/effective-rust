@@ -11,7 +11,9 @@ impl Effect for ConversionError {
     type Output = usize;
 }
 
-fn parse<E: From<ConversionError> + 'static>(line: String) -> WithEffect<E, usize> {
+fn parse<E: From<ConversionError> + 'static, C: Perform<ConversionError> + 'static>(
+    line: String,
+) -> WithEffect<E, usize, C> {
     eff! {
         match line.parse() {
             Ok(x) => x,
@@ -33,7 +35,7 @@ fn sum_up(s: String) -> usize {
         handler! {
             A @ ConversionError[eff, k] => {
                 println!("conversion error: {}", eff.0);
-                k.run::<ConversionError>(0)
+                resume!(k, 0)
             }
         },
     )

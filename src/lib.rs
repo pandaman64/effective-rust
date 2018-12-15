@@ -1,7 +1,6 @@
 #![feature(fnbox, nll, generators, generator_trait)]
 #![feature(trace_macros)]
 
-use std::any::Any;
 use std::boxed::FnBox;
 use std::cell::RefCell;
 use std::ops::{Generator, GeneratorState};
@@ -65,7 +64,7 @@ macro_rules! eff_muncher {
 macro_rules! eff {
     // Begin with an empty stack.
     ($($input:tt)+) => {{
-        Box::new(|context: Context<_, _>| -> WithEffectInner<_, _> {
+        Box::new(|context: Context<_, _, _>| -> WithEffectInner<_, _> {
             WithEffectInner {
                 inner: Box::new(
                     #[allow(unreachable_code)]
@@ -87,8 +86,11 @@ macro_rules! eff {
 macro_rules! perform_impl {
     (@$ctx:ident, $eff:expr) => {{
         #[inline(always)]
-        fn __getter<T: Effect>(_: &T, channel: Channel) -> impl FnOnce() -> <T as Effect>::Output {
-            move || channel.get()
+        fn __getter<E: Effect, C: Perform<E>>(
+            _: &E,
+            channel: Channel<C>,
+        ) -> impl FnOnce() -> <E as Effect>::Output {
+            move || channel.get::<E>()
         }
         let eff = $eff;
         let getter = __getter(&eff, $ctx.channel.clone());
@@ -104,10 +106,10 @@ macro_rules! invoke_impl {
     }};
 }
 
-pub type WithEffect<E, T> = Box<FnBox(Context<E, T>) -> WithEffectInner<E, T>>;
+pub type WithEffect<E, T, C> = Box<FnBox(Context<E, T, C>) -> WithEffectInner<E, T>>;
 
 pub trait Effect {
-    type Output: Any;
+    type Output;
 }
 
 pub struct WithEffectInner<E, T> {
@@ -115,32 +117,43 @@ pub struct WithEffectInner<E, T> {
 }
 
 impl<E, T> WithEffectInner<E, T> {
-    pub fn invoke(self, context: Context<E, T>) -> T {
+    pub fn invoke<C>(self, context: Context<E, T, C>) -> T {
         _handle(context, self)
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Channel {
-    pub inner: Rc<RefCell<Option<Box<dyn Any>>>>,
+pub trait Perform<E>
+where
+    E: Effect,
+{
+    fn into(self) -> E::Output;
 }
 
-impl Channel {
+#[derive(Debug)]
+pub struct Channel<C> {
+    pub inner: Rc<RefCell<Option<C>>>,
+}
+
+impl<C> Channel<C> {
     fn new() -> Self {
         Default::default()
     }
 
-    pub fn set<T: Any>(&self, v: T) {
-        *self.inner.borrow_mut() = Some(Box::new(v));
+    pub fn set(&self, v: C) {
+        *self.inner.borrow_mut() = Some(v);
     }
 
-    pub fn get<T: Any>(&self) -> T {
+    pub fn get<E>(&self) -> E::Output
+    where
+        E: Effect,
+        C: Perform<E>,
+    {
         let value = self.inner.borrow_mut().take().unwrap();
-        *value.downcast().unwrap()
+        value.into()
     }
 }
 
-impl Clone for Channel {
+impl<C> Clone for Channel<C> {
     fn clone(&self) -> Self {
         Channel {
             inner: self.inner.clone(),
@@ -148,12 +161,20 @@ impl Clone for Channel {
     }
 }
 
-pub struct Context<E, T> {
-    pub channel: Channel,
-    pub handler: Rc<Fn(E, Continuation<E, T>) -> T>,
+impl<C> Default for Channel<C> {
+    fn default() -> Self {
+        Channel {
+            inner: Rc::new(RefCell::new(None)),
+        }
+    }
 }
 
-impl<E, T> Clone for Context<E, T> {
+pub struct Context<E, T, C> {
+    pub channel: Channel<C>,
+    pub handler: Rc<Fn(E, Continuation<E, T, C>) -> T>,
+}
+
+impl<E, T, C> Clone for Context<E, T, C> {
     fn clone(&self) -> Self {
         Context {
             channel: self.channel.clone(),
@@ -162,19 +183,19 @@ impl<E, T> Clone for Context<E, T> {
     }
 }
 
-pub struct Continuation<E, T> {
+pub struct Continuation<E, T, C> {
     expr: WithEffectInner<E, T>,
-    context: Context<E, T>,
+    context: Context<E, T, C>,
 }
 
-impl<E, T> Continuation<E, T> {
-    pub fn run<ConcreteEff: Effect>(self, v: ConcreteEff::Output) -> T {
+impl<E, T, C> Continuation<E, T, C> {
+    pub fn run(self, v: C) -> T {
         self.context.channel.set(v);
         _handle(self.context, self.expr)
     }
 }
 
-fn _handle<E, T>(context: Context<E, T>, mut expr: WithEffectInner<E, T>) -> T {
+fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) -> T {
     let state = unsafe { expr.inner.resume() };
     match state {
         GeneratorState::Yielded(effect) => {
@@ -185,13 +206,13 @@ fn _handle<E, T>(context: Context<E, T>, mut expr: WithEffectInner<E, T>) -> T {
     }
 }
 
-pub fn handle<E, T, H, VH, R>(
-    gen_func: Box<FnBox(Context<E, T>) -> WithEffectInner<E, T>>,
+pub fn handle<E, T, C, H, VH, R>(
+    gen_func: Box<FnBox(Context<E, T, C>) -> WithEffectInner<E, T>>,
     value_handler: VH,
     handler: H,
 ) -> R
 where
-    H: Fn(E, Continuation<E, T>) -> T + 'static,
+    H: Fn(E, Continuation<E, T, C>) -> T + 'static,
     VH: FnOnce(T) -> R,
 {
     let context = Context {
@@ -203,8 +224,63 @@ where
 }
 
 #[macro_export]
+macro_rules! handler_muncher {
+    // Open parenthesis.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
+        handler_muncher!(@$channel, @$variant, @$ctx, @(() $($stack)*) $($first)* __paren $($rest)*)
+    };
+
+    // Open square bracket.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
+        handler_muncher!(@$channel, @$variant, @$ctx, @(() $($stack)*) $($first)* __bracket $($rest)*)
+    };
+
+    // Open brace.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
+        handler_muncher!(@$channel, @$variant, @$ctx, @(() $($stack)*) $($first)* __brace $($rest)*)
+    };
+
+    // Close parenthesis.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
+        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
+    };
+
+    // Close square bracket.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
+        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
+    };
+
+    // Close brace.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
+        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
+    };
+
+    // Replace `resume!($k, $e)` tokens with `resume_impl!(@$channel, $variant, $ctx, $k, $e)`.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) resume!($k:expr, $e:expr) $($rest:tt)*) => {
+        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* resume_impl!(@$channel, @$variant, @$ctx, $k, $e)) $($stack)*) $($rest)*)
+    };
+
+    // Munch a token that is not `resume!`.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
+        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* $first) $($stack)*) $($rest)*)
+    };
+
+    // Done.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)+))) => {{
+        $($top)+
+    }};
+}
+
+#[macro_export]
+macro_rules! resume_impl {
+    (@$channel:ident, @$variant:ident, @$ctx:ty, $k:expr, $e:expr) => {{
+        $k.run($channel::$variant($e))
+    }};
+}
+
+#[macro_export]
 macro_rules! handler {
-    ( $($variant:ident @ $eff_type:ty [ $eff:pat, $k:pat ] => $e:expr),* ) => {{
+    ( $($variant:ident @ $eff_type:ty [ $eff:pat, $k:pat ] => $e:tt),* ) => {{
         enum Effects {
             $($variant($eff_type),)*
         }
@@ -217,11 +293,26 @@ macro_rules! handler {
             }
         )*
 
+        enum Channel {
+            $($variant(<$eff_type as Effect>::Output),)*
+        }
+
+        $(
+            impl Perform<$eff_type> for Channel {
+                fn into(self) -> <$eff_type as Effect>::Output {
+                    match self {
+                        Channel::$variant(x) => x,
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        )*
+
         |eff: Effects, k| match eff {
             $(
                 Effects::$variant($eff) => {
                     let $k = k;
-                    $e
+                    handler_muncher!(@Channel, @$variant, @$eff_type, @(()) $e)
                 }
             )*
         }
