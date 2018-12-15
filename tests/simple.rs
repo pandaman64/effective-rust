@@ -1,5 +1,4 @@
 #![feature(generators, never_type)]
-#![feature(trace_macros)]
 
 extern crate eff;
 use eff::*;
