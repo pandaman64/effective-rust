@@ -9,57 +9,60 @@ use std::rc::Rc;
 
 // https://users.rust-lang.org/t/macro-to-replace-type-parameters/17903
 #[macro_export]
-macro_rules! eff {
+macro_rules! eff_muncher {
     // Open parenthesis.
     (@$ctx:ident, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
-        eff!(@$ctx, @(() $($stack)*) $($first)* __paren $($rest)*)
+        eff_muncher!(@$ctx, @(() $($stack)*) $($first)* __paren $($rest)*)
     };
 
     // Open square bracket.
     (@$ctx:ident, @($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
-        eff!(@$ctx, @(() $($stack)*) $($first)* __bracket $($rest)*)
+        eff_muncher!(@$ctx, @(() $($stack)*) $($first)* __bracket $($rest)*)
     };
 
     // Open brace.
     (@$ctx:ident, @($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
-        eff!(@$ctx, @(() $($stack)*) $($first)* __brace $($rest)*)
+        eff_muncher!(@$ctx, @(() $($stack)*) $($first)* __brace $($rest)*)
     };
 
     // Close parenthesis.
     (@$ctx:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
-        eff!(@$ctx, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
+        eff_muncher!(@$ctx, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
     };
 
     // Close square bracket.
     (@$ctx:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
-        eff!(@$ctx, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
+        eff_muncher!(@$ctx, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
     };
 
     // Close brace.
     (@$ctx:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
-        eff!(@$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
+        eff_muncher!(@$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
     };
 
     // Replace `perform!($e)` tokens with `perform_impl!(@$ctx, $e)`.
     (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) perform!($e:expr) $($rest:tt)*) => {
-        eff!(@$ctx, @(($($top)* perform_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
+        eff_muncher!(@$ctx, @(($($top)* perform_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
     };
 
     // Replace `invoke!($e)` tokens with `invoke_impl!(@$ctx, $e)`.
     (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) invoke!($e:expr) $($rest:tt)*) => {
-        eff!(@$ctx, @(($($top)* invoke_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
+        eff_muncher!(@$ctx, @(($($top)* invoke_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
     };
 
     // Munch a token that is not `perform!` nor `invoke!`.
     (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
-        eff!(@$ctx, @(($($top)* $first) $($stack)*) $($rest)*)
+        eff_muncher!(@$ctx, @(($($top)* $first) $($stack)*) $($rest)*)
     };
 
     // Done.
     (@$ctx:ident, @(($($top:tt)+))) => {{
         $($top)+
     }};
+}
 
+#[macro_export]
+macro_rules! eff {
     // Begin with an empty stack.
     ($($input:tt)+) => {{
         Box::new(|context: Context<_, _>| -> WithEffectInner<_, _> {
@@ -67,12 +70,12 @@ macro_rules! eff {
                 inner: Box::new(
                     #[allow(unreachable_code)]
                     move || {
-                        // This trick have the compiler treat this closure
-                        // as a generator if $input doesn't contain no generator
+                        // This trick lets the compiler treat this closure
+                        // as a generator even if $input doesn't contain no perform
                         // (no yield).
                         // see: https://stackoverflow.com/a/53757228/8554666
                         if false { yield unreachable!(); }
-                        eff!(@context, @(()) $($input)*)
+                        eff_muncher!(@context, @(()) $($input)*)
                     }
                 )
             }
