@@ -308,7 +308,7 @@ macro_rules! handler {
             }
         )*
 
-        |eff: Effects, k| match eff {
+        move |eff: Effects, k| match eff {
             $(
                 Effects::$variant($eff) => {
                     let $k = k;
