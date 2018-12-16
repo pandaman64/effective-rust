@@ -42,18 +42,18 @@ fn test_example() {
         expr_with_effect,
         |x| x,
         handler! {
-            A @ Foo[foo, k] => {
+            A @ Foo[foo] => {
                 println!("foo");
                 match foo {
-                    Foo::This(idx) => resume!(k, idx * 2),
-                    Foo::That(idx) => resume!(k, idx - 1),
+                    Foo::This(idx) => resume!(idx * 2),
+                    Foo::That(idx) => resume!(idx - 1),
                 }
             },
-            B @ Bar[_eff, k] => {
+            B @ Bar[_eff] => {
                 println!("bar");
-                resume!(k, "Hello, World!".into())
+                resume!("Hello, World!".into())
             },
-            C @ effects::Baz[_eff, _k] => {
+            C @ effects::Baz[_eff] => {
                 println!("baz");
                 'x'
             }

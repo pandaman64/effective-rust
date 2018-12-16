@@ -25,9 +25,9 @@ fn sum_up(s: String) -> usize {
         },
         |x| x,
         handler! {
-            A @ ConversionError[eff, k] => {
+            A @ ConversionError[eff] => {
                 println!("conversion error: {}", eff.0);
-                resume!(k, 0)
+                resume!(0)
             }
         },
     )

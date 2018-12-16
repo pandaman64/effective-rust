@@ -49,23 +49,23 @@ fn test_state() {
         },
         |x| x,
         handler! {
-            GI @ GetInt[_, k] => {
-                resume!(k, i)
+            GI @ GetInt[_] => {
+                resume!(i)
             },
-            SI @ SetInt[SetInt(x), k] => {
+            SI @ SetInt[SetInt(x)] => {
                 i = x;
-                resume!(k, ())
+                resume!(())
             },
-            UI @ UpdateInt[UpdateInt(f), k] => {
+            UI @ UpdateInt[UpdateInt(f)] => {
                 i = f(i);
-                resume!(k, ())
+                resume!(())
             },
-            GS @ GetStr[_, k] => {
-                resume!(k, s.clone())
+            GS @ GetStr[_] => {
+                resume!(s.clone())
             },
-            SS @ SetStr[SetStr(x), k] => {
+            SS @ SetStr[SetStr(x)] => {
                 s = x;
-                resume!(k, ())
+                resume!(())
             }
         },
     )

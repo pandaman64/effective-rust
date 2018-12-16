@@ -16,8 +16,8 @@ fn test_simple() {
         },
         |x| x,
         handler! {
-            A @ Eff[_, k] => {
-                resume!(k, "Hello".into())
+            A @ Eff[_] => {
+                resume!("Hello".into())
             }
         },
     );

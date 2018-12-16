@@ -247,9 +247,9 @@ macro_rules! handler_muncher {
         handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
     };
 
-    // Replace `resume!($k, $e)` tokens with `resume_impl!(@$channel, $variant, $ctx, $k, $e)`.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) resume!($k:expr, $e:expr) $($rest:tt)*) => {
-        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* resume_impl!(@$channel, @$variant, @$ctx, $k, $e)) $($stack)*) $($rest)*)
+    // Replace `resume!($e)` tokens with `resume_impl!(@$channel, $variant, $ctx, $e)`.
+    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) resume!($e:expr) $($rest:tt)*) => {
+        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* resume_impl!(@$channel, @$variant, @$ctx, $e)) $($stack)*) $($rest)*)
     };
 
     // Munch a token that is not `resume!`.
@@ -265,7 +265,7 @@ macro_rules! handler_muncher {
 
 #[macro_export]
 macro_rules! resume_impl {
-    (@$channel:ident, @$variant:ident, @$ctx:ty, $k:expr, $e:expr) => {{
+    (@$channel:ident, @$variant:ident, @$ctx:ty, $e:expr) => {{
         return $crate::HandlerResult::Resume($channel::$variant($e));
         unreachable!()
     }};
@@ -273,7 +273,7 @@ macro_rules! resume_impl {
 
 #[macro_export]
 macro_rules! handler {
-    ( $($variant:ident @ $eff_type:ty [ $eff:pat, $k:pat ] => $e:tt),* ) => {{
+    ( $($variant:ident @ $eff_type:ty [ $eff:pat ] => $e:tt),* ) => {{
         enum Effects {
             $($variant($eff_type),)*
         }
