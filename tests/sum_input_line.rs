@@ -11,23 +11,15 @@ impl Effect for ConversionError {
     type Output = usize;
 }
 
-fn parse<E: From<ConversionError> + 'static, C: Perform<ConversionError> + 'static>(
-    line: String,
-) -> WithEffect<E, usize, C> {
-    eff! {
-        match line.parse() {
-            Ok(x) => x,
-            Err(_) => perform!(ConversionError(line.to_string())),
-        }
-    }
-}
-
 fn sum_up(s: String) -> usize {
     handle(
         eff! {
             let mut sum = 0_usize;
             for line in s.split('\n') {
-                sum += invoke!(parse(line.to_string()));
+                sum += match line.parse() {
+                    Ok(x) => x,
+                    Err(_e) => perform!(ConversionError(line.to_string())),
+                }
             }
             sum
         },

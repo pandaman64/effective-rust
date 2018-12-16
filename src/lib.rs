@@ -45,9 +45,9 @@ macro_rules! eff_muncher {
     };
 
     // Replace `invoke!($e)` tokens with `invoke_impl!(@$ctx, $e)`.
-    (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) invoke!($e:expr) $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(($($top)* invoke_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
-    };
+    // (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) invoke!($e:expr) $($rest:tt)*) => {
+    //     eff_muncher!(@$ctx, @(($($top)* invoke_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
+    // };
 
     // Munch a token that is not `perform!` nor `invoke!`.
     (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
@@ -68,7 +68,7 @@ macro_rules! eff {
             WithEffectInner {
                 inner: Box::new(
                     #[allow(unreachable_code)]
-                    move || {
+                    static move || {
                         // This trick lets the compiler treat this closure
                         // as a generator even if $input doesn't contain no perform
                         // (no yield).
@@ -86,23 +86,16 @@ macro_rules! eff {
 macro_rules! perform_impl {
     (@$ctx:ident, $eff:expr) => {{
         #[inline(always)]
-        fn __getter<E: Effect, C: Perform<E>>(
-            _: &E,
+        fn __getter<'e, 'c, E: Effect, C: Perform<E> + 'c>(
+            _: &'e E,
             channel: Channel<C>,
-        ) -> impl FnOnce() -> <E as Effect>::Output {
+        ) -> impl FnOnce() -> <E as Effect>::Output + 'c {
             move || channel.get::<E>()
         }
         let eff = $eff;
         let getter = __getter(&eff, $ctx.channel.clone());
         yield Into::into(eff);
         getter()
-    }};
-}
-
-#[macro_export]
-macro_rules! invoke_impl {
-    (@$ctx:ident, $eff:expr) => {{
-        $eff($ctx.clone()).invoke($ctx.clone())
     }};
 }
 
@@ -114,12 +107,6 @@ pub trait Effect {
 
 pub struct WithEffectInner<E, T> {
     pub inner: Box<Generator<Yield = E, Return = T>>,
-}
-
-impl<E, T> WithEffectInner<E, T> {
-    pub fn invoke<C>(self, context: Context<E, T, C>) -> T {
-        _handle(context, self)
-    }
 }
 
 pub trait Perform<E>
@@ -183,7 +170,12 @@ impl<E, T, C> Clone for Context<E, T, C> {
     }
 }
 
-fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) -> T {
+enum HandleResult<T> {
+    Exit(T),
+    Complete(T),
+}
+
+fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) -> HandleResult<T> {
     loop {
         let state = unsafe { expr.inner.resume() };
         match state {
@@ -191,10 +183,10 @@ fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) 
                 let handler = &mut *context.handler.borrow_mut();
                 match handler(effect) {
                     HandlerResult::Resume(c) => context.channel.set(c),
-                    HandlerResult::Exit(v) => return v,
+                    HandlerResult::Exit(v) => return HandleResult::Exit(v),
                 }
             }
-            GeneratorState::Complete(v) => return v,
+            GeneratorState::Complete(v) => return HandleResult::Complete(v),
         }
     }
 }
@@ -213,7 +205,9 @@ where
         handler: Rc::new(RefCell::new(handler)),
     };
     let expr = gen_func(context.clone());
-    value_handler(_handle(context, expr))
+    match _handle(context, expr) {
+        HandleResult::Exit(v) | HandleResult::Complete(v) => value_handler(v),
+    }
 }
 
 pub enum HandlerResult<T, C> {
