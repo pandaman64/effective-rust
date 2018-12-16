@@ -106,7 +106,7 @@ pub trait Effect {
 }
 
 pub struct WithEffectInner<E, T> {
-    pub inner: Box<Generator<Yield = E, Return = T>>,
+    pub inner: Box<dyn Generator<Yield = E, Return = T>>,
 }
 
 pub trait Channel<E>
@@ -158,7 +158,7 @@ impl<C> Default for Store<C> {
 
 pub struct Context<E, T, C> {
     pub store: Store<C>,
-    pub handler: Rc<RefCell<FnMut(E) -> HandlerResult<T, C>>>,
+    pub handler: Rc<RefCell<dyn FnMut(E) -> HandlerResult<T, C>>>,
 }
 
 impl<E, T, C> Clone for Context<E, T, C> {
@@ -187,7 +187,7 @@ fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) 
 }
 
 pub fn handle<E, T, C, H, VH, R>(
-    gen_func: Box<FnBox(Context<E, T, C>) -> WithEffectInner<E, T>>,
+    gen_func: Box<dyn FnBox(Context<E, T, C>) -> WithEffectInner<E, T>>,
     value_handler: VH,
     handler: H,
 ) -> R
