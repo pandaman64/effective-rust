@@ -1,7 +1,6 @@
-#![feature(fnbox, nll, generators, generator_trait)]
+#![feature(nll, generators, generator_trait, unsized_locals)]
 #![feature(trace_macros)]
 
-use std::boxed::FnBox;
 use std::cell::RefCell;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
@@ -99,7 +98,7 @@ macro_rules! perform {
     }};
 }
 
-pub type WithEffect<E, T, C> = Box<FnBox(Context<E, T, C>) -> WithEffectInner<E, T>>;
+pub type WithEffect<E, T, C> = Box<dyn FnOnce(Context<E, T, C>) -> WithEffectInner<E, T>>;
 
 pub trait Effect {
     type Output;
@@ -187,7 +186,7 @@ fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) 
 }
 
 pub fn handle<E, T, C, H, VH, R>(
-    gen_func: Box<dyn FnBox(Context<E, T, C>) -> WithEffectInner<E, T>>,
+    gen_func: Box<dyn FnOnce(Context<E, T, C>) -> WithEffectInner<E, T>>,
     value_handler: VH,
     handler: H,
 ) -> R
