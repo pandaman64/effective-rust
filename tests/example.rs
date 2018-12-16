@@ -1,6 +1,5 @@
 #![feature(generators, never_type)]
 
-extern crate eff;
 use eff::*;
 
 #[derive(Debug)]

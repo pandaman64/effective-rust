@@ -1,8 +1,7 @@
 //! 2. Effectful Computations in a Pure Setting
 
-#![feature(fnbox, generators, never_type)]
+#![feature(fnbox, generators)]
 
-extern crate eff;
 use eff::*;
 
 use std::boxed::FnBox;

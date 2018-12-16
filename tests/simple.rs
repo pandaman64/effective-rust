@@ -1,6 +1,5 @@
-#![feature(generators, never_type)]
+#![feature(generators)]
 
-extern crate eff;
 use eff::*;
 
 struct Eff;

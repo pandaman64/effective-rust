@@ -1,8 +1,7 @@
 //! 1.1. Recovering from errors
 
-#![feature(generators, never_type)]
+#![feature(generators)]
 
-extern crate eff;
 use eff::*;
 
 #[derive(Debug)]
