@@ -39,14 +39,14 @@ macro_rules! eff_muncher {
         eff_muncher!(@$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
     };
 
-    // Replace `perform!($e)` tokens with `perform_impl!(@$ctx, $e)`.
+    // Replace `perform!($e)` tokens with `perform!(@$ctx, $e)`.
     (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) perform!($e:expr) $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(($($top)* perform_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
+        eff_muncher!(@$ctx, @(($($top)* perform!(@$ctx, $e)) $($stack)*) $($rest)*)
     };
 
-    // Replace `invoke!($e)` tokens with `invoke_impl!(@$ctx, $e)`.
+    // Replace `invoke!($e)` tokens with `invoke!(@$ctx, $e)`.
     // (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) invoke!($e:expr) $($rest:tt)*) => {
-    //     eff_muncher!(@$ctx, @(($($top)* invoke_impl!(@$ctx, $e)) $($stack)*) $($rest)*)
+    //     eff_muncher!(@$ctx, @(($($top)* invoke!(@$ctx, $e)) $($stack)*) $($rest)*)
     // };
 
     // Munch a token that is not `perform!` nor `invoke!`.
@@ -83,7 +83,7 @@ macro_rules! eff {
 }
 
 #[macro_export]
-macro_rules! perform_impl {
+macro_rules! perform {
     (@$ctx:ident, $eff:expr) => {{
         #[inline(always)]
         fn __getter<'e, 'c, E: Effect, C: Channel<E> + 'c>(
@@ -240,9 +240,9 @@ macro_rules! handler_muncher {
         handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
     };
 
-    // Replace `resume!($e)` tokens with `resume_impl!(@$store, $variant, $ctx, $e)`.
+    // Replace `resume!($e)` tokens with `resume!(@$store, $variant, $ctx, $e)`.
     (@$store:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) resume!($e:expr) $($rest:tt)*) => {
-        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* resume_impl!(@$store, @$variant, @$ctx, $e)) $($stack)*) $($rest)*)
+        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* resume!(@$store, @$variant, @$ctx, $e)) $($stack)*) $($rest)*)
     };
 
     // Munch a token that is not `resume!`.
@@ -257,7 +257,7 @@ macro_rules! handler_muncher {
 }
 
 #[macro_export]
-macro_rules! resume_impl {
+macro_rules! resume {
     (@$store:ident, @$variant:ident, @$ctx:ty, $e:expr) => {{
         return $crate::HandlerResult::Resume($store::$variant($e));
         unreachable!()
