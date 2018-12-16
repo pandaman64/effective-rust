@@ -86,14 +86,14 @@ macro_rules! eff {
 macro_rules! perform_impl {
     (@$ctx:ident, $eff:expr) => {{
         #[inline(always)]
-        fn __getter<'e, 'c, E: Effect, C: Perform<E> + 'c>(
+        fn __getter<'e, 'c, E: Effect, C: Channel<E> + 'c>(
             _: &'e E,
-            channel: Channel<C>,
+            store: Store<C>,
         ) -> impl FnOnce() -> <E as Effect>::Output + 'c {
-            move || channel.get::<E>()
+            move || store.get::<E>()
         }
         let eff = $eff;
-        let getter = __getter(&eff, $ctx.channel.clone());
+        let getter = __getter(&eff, $ctx.store.clone());
         yield Into::into(eff);
         getter()
     }};
@@ -109,7 +109,7 @@ pub struct WithEffectInner<E, T> {
     pub inner: Box<Generator<Yield = E, Return = T>>,
 }
 
-pub trait Perform<E>
+pub trait Channel<E>
 where
     E: Effect,
 {
@@ -117,11 +117,11 @@ where
 }
 
 #[derive(Debug)]
-pub struct Channel<C> {
+pub struct Store<C> {
     pub inner: Rc<RefCell<Option<C>>>,
 }
 
-impl<C> Channel<C> {
+impl<C> Store<C> {
     fn new() -> Self {
         Default::default()
     }
@@ -133,60 +133,55 @@ impl<C> Channel<C> {
     pub fn get<E>(&self) -> E::Output
     where
         E: Effect,
-        C: Perform<E>,
+        C: Channel<E>,
     {
         let value = self.inner.borrow_mut().take().unwrap();
         value.into()
     }
 }
 
-impl<C> Clone for Channel<C> {
+impl<C> Clone for Store<C> {
     fn clone(&self) -> Self {
-        Channel {
+        Store {
             inner: self.inner.clone(),
         }
     }
 }
 
-impl<C> Default for Channel<C> {
+impl<C> Default for Store<C> {
     fn default() -> Self {
-        Channel {
+        Store {
             inner: Rc::new(RefCell::new(None)),
         }
     }
 }
 
 pub struct Context<E, T, C> {
-    pub channel: Channel<C>,
+    pub store: Store<C>,
     pub handler: Rc<RefCell<FnMut(E) -> HandlerResult<T, C>>>,
 }
 
 impl<E, T, C> Clone for Context<E, T, C> {
     fn clone(&self) -> Self {
         Context {
-            channel: self.channel.clone(),
+            store: self.store.clone(),
             handler: self.handler.clone(),
         }
     }
 }
 
-enum HandleResult<T> {
-    Exit(T),
-    Complete(T),
-}
-
-fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) -> HandleResult<T> {
+fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) -> T {
     loop {
         let state = unsafe { expr.inner.resume() };
         match state {
             GeneratorState::Yielded(effect) => {
                 let handler = &mut *context.handler.borrow_mut();
                 match handler(effect) {
-                    HandlerResult::Resume(c) => context.channel.set(c),
-                    HandlerResult::Exit(v) => return HandleResult::Exit(v),
+                    HandlerResult::Resume(c) => context.store.set(c),
+                    HandlerResult::Exit(v) => return v,
                 }
             }
-            GeneratorState::Complete(v) => return HandleResult::Complete(v),
+            GeneratorState::Complete(v) => return v,
         }
     }
 }
@@ -201,13 +196,11 @@ where
     VH: FnOnce(T) -> R,
 {
     let context = Context {
-        channel: Channel::new(),
+        store: Store::new(),
         handler: Rc::new(RefCell::new(handler)),
     };
     let expr = gen_func(context.clone());
-    match _handle(context, expr) {
-        HandleResult::Exit(v) | HandleResult::Complete(v) => value_handler(v),
-    }
+    value_handler(_handle(context, expr))
 }
 
 pub enum HandlerResult<T, C> {
@@ -218,55 +211,55 @@ pub enum HandlerResult<T, C> {
 #[macro_export]
 macro_rules! handler_muncher {
     // Open parenthesis.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
-        handler_muncher!(@$channel, @$variant, @$ctx, @(() $($stack)*) $($first)* __paren $($rest)*)
+    (@$store:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
+        handler_muncher!(@$store, @$variant, @$ctx, @(() $($stack)*) $($first)* __paren $($rest)*)
     };
 
     // Open square bracket.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
-        handler_muncher!(@$channel, @$variant, @$ctx, @(() $($stack)*) $($first)* __bracket $($rest)*)
+    (@$store:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
+        handler_muncher!(@$store, @$variant, @$ctx, @(() $($stack)*) $($first)* __bracket $($rest)*)
     };
 
     // Open brace.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
-        handler_muncher!(@$channel, @$variant, @$ctx, @(() $($stack)*) $($first)* __brace $($rest)*)
+    (@$store:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
+        handler_muncher!(@$store, @$variant, @$ctx, @(() $($stack)*) $($first)* __brace $($rest)*)
     };
 
     // Close parenthesis.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
-        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
+    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
+        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
     };
 
     // Close square bracket.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
-        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
+    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
+        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
     };
 
     // Close brace.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
-        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
+    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
+        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
     };
 
-    // Replace `resume!($e)` tokens with `resume_impl!(@$channel, $variant, $ctx, $e)`.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) resume!($e:expr) $($rest:tt)*) => {
-        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* resume_impl!(@$channel, @$variant, @$ctx, $e)) $($stack)*) $($rest)*)
+    // Replace `resume!($e)` tokens with `resume_impl!(@$store, $variant, $ctx, $e)`.
+    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) resume!($e:expr) $($rest:tt)*) => {
+        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* resume_impl!(@$store, @$variant, @$ctx, $e)) $($stack)*) $($rest)*)
     };
 
     // Munch a token that is not `resume!`.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
-        handler_muncher!(@$channel, @$variant, @$ctx, @(($($top)* $first) $($stack)*) $($rest)*)
+    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
+        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* $first) $($stack)*) $($rest)*)
     };
 
     // Done.
-    (@$channel:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)+))) => {{
+    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)+))) => {{
         $($top)+
     }};
 }
 
 #[macro_export]
 macro_rules! resume_impl {
-    (@$channel:ident, @$variant:ident, @$ctx:ty, $e:expr) => {{
-        return $crate::HandlerResult::Resume($channel::$variant($e));
+    (@$store:ident, @$variant:ident, @$ctx:ty, $e:expr) => {{
+        return $crate::HandlerResult::Resume($store::$variant($e));
         unreachable!()
     }};
 }
@@ -286,15 +279,15 @@ macro_rules! handler {
             }
         )*
 
-        enum Channel {
+        enum Channels {
             $($variant(<$eff_type as Effect>::Output),)*
         }
 
         $(
-            impl Perform<$eff_type> for Channel {
+            impl $crate::Channel<$eff_type> for Channels {
                 fn into(self) -> <$eff_type as Effect>::Output {
                     match self {
-                        Channel::$variant(x) => x,
+                        Channels::$variant(x) => x,
                         _ => unreachable!(),
                     }
                 }
@@ -305,7 +298,7 @@ macro_rules! handler {
         move |eff: Effects| match eff {
             $(
                 Effects::$variant($eff) => {
-                    $crate::HandlerResult::Exit(handler_muncher!(@Channel, @$variant, @$eff_type, @(()) $e))
+                    $crate::HandlerResult::Exit(handler_muncher!(@Channels, @$variant, @$eff_type, @(()) $e))
                 }
             )*
         }
