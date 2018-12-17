@@ -63,8 +63,8 @@ macro_rules! eff_muncher {
 macro_rules! eff {
     // Begin with an empty stack.
     ($($input:tt)+) => {{
-        Box::new(|context: Context<_, _, _>| -> WithEffectInner<_, _> {
-            WithEffectInner {
+        Box::new(|store: $crate::Store<_>| -> $crate::WithEffectInner<_, _> {
+            $crate::WithEffectInner {
                 inner: Box::new(
                     #[allow(unreachable_code)]
                     static move || {
@@ -73,7 +73,7 @@ macro_rules! eff {
                         // (no yield).
                         // see: https://stackoverflow.com/a/53757228/8554666
                         if false { yield unreachable!(); }
-                        eff_muncher!(@context, @(()) $($input)*)
+                        eff_muncher!(@store, @(()) $($input)*)
                     }
                 )
             }
@@ -83,22 +83,20 @@ macro_rules! eff {
 
 #[macro_export]
 macro_rules! perform {
-    (@$ctx:ident, $eff:expr) => {{
+    (@$store:ident, $eff:expr) => {{
         #[inline(always)]
-        fn __getter<'e, 'c, E: Effect, C: Channel<E> + 'c>(
+        fn __getter<'e, 'c, E: $crate::Effect, C: $crate::Channel<E> + 'c>(
             _: &'e E,
-            store: Store<C>,
-        ) -> impl FnOnce() -> <E as Effect>::Output + 'c {
+            store: $crate::Store<C>,
+        ) -> impl FnOnce() -> <E as $crate::Effect>::Output + 'c {
             move || store.get::<E>()
         }
         let eff = $eff;
-        let getter = __getter(&eff, $ctx.store.clone());
+        let getter = __getter(&eff, $store.clone());
         yield Into::into(eff);
         getter()
     }};
 }
-
-pub type WithEffect<E, T, C> = Box<dyn FnOnce(Context<E, T, C>) -> WithEffectInner<E, T>>;
 
 pub trait Effect {
     type Output;
@@ -155,38 +153,25 @@ impl<C> Default for Store<C> {
     }
 }
 
-pub struct Context<E, T, C> {
-    pub store: Store<C>,
-    pub handler: Rc<RefCell<dyn FnMut(E) -> HandlerResult<T, C>>>,
-}
-
-impl<E, T, C> Clone for Context<E, T, C> {
-    fn clone(&self) -> Self {
-        Context {
-            store: self.store.clone(),
-            handler: self.handler.clone(),
-        }
-    }
-}
-
-fn _handle<E, T, C>(context: Context<E, T, C>, mut expr: WithEffectInner<E, T>) -> T {
+fn _handle<E, T, C, H>(store: Store<C>, mut expr: WithEffectInner<E, T>, mut handler: H) -> T
+where
+    H: FnMut(E) -> HandlerResult<T, C>,
+{
     loop {
+        // this resume is safe since the generator is pinned in a heap
         let state = unsafe { expr.inner.resume() };
         match state {
-            GeneratorState::Yielded(effect) => {
-                let handler = &mut *context.handler.borrow_mut();
-                match handler(effect) {
-                    HandlerResult::Resume(c) => context.store.set(c),
-                    HandlerResult::Exit(v) => return v,
-                }
-            }
+            GeneratorState::Yielded(effect) => match handler(effect) {
+                HandlerResult::Resume(c) => store.set(c),
+                HandlerResult::Exit(v) => return v,
+            },
             GeneratorState::Complete(v) => return v,
         }
     }
 }
 
 pub fn handle<E, T, C, H, VH, R>(
-    gen_func: Box<dyn FnOnce(Context<E, T, C>) -> WithEffectInner<E, T>>,
+    gen_func: Box<dyn FnOnce(Store<C>) -> WithEffectInner<E, T>>,
     value_handler: VH,
     handler: H,
 ) -> R
@@ -194,12 +179,9 @@ where
     H: FnMut(E) -> HandlerResult<T, C> + 'static,
     VH: FnOnce(T) -> R,
 {
-    let context = Context {
-        store: Store::new(),
-        handler: Rc::new(RefCell::new(handler)),
-    };
-    let expr = gen_func(context.clone());
-    value_handler(_handle(context, expr))
+    let store = Store::new();
+    let expr = gen_func(store.clone());
+    value_handler(_handle(store, expr, handler))
 }
 
 pub enum HandlerResult<T, C> {
