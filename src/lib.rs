@@ -153,10 +153,17 @@ impl<C> Default for Store<C> {
     }
 }
 
-fn _handle<E, T, C, H>(store: Store<C>, mut expr: WithEffectInner<E, T>, mut handler: H) -> T
+pub fn run<E, T, C, H, VH, R>(
+    gen_func: Box<dyn FnOnce(Store<C>) -> WithEffectInner<E, T>>,
+    value_handler: VH,
+    mut handler: H,
+) -> R
 where
-    H: FnMut(E) -> HandlerResult<T, C>,
+    H: FnMut(E) -> HandlerResult<R, C> + 'static,
+    VH: FnOnce(T) -> R,
 {
+    let store = Store::new();
+    let mut expr = gen_func(store.clone());
     loop {
         // this resume is safe since the generator is pinned in a heap
         let state = unsafe { expr.inner.resume() };
@@ -165,28 +172,14 @@ where
                 HandlerResult::Resume(c) => store.set(c),
                 HandlerResult::Exit(v) => return v,
             },
-            GeneratorState::Complete(v) => return v,
+            GeneratorState::Complete(v) => return value_handler(v),
         }
     }
 }
 
-pub fn handle<E, T, C, H, VH, R>(
-    gen_func: Box<dyn FnOnce(Store<C>) -> WithEffectInner<E, T>>,
-    value_handler: VH,
-    handler: H,
-) -> R
-where
-    H: FnMut(E) -> HandlerResult<T, C> + 'static,
-    VH: FnOnce(T) -> R,
-{
-    let store = Store::new();
-    let expr = gen_func(store.clone());
-    value_handler(_handle(store, expr, handler))
-}
-
-pub enum HandlerResult<T, C> {
+pub enum HandlerResult<R, C> {
     Resume(C),
-    Exit(T),
+    Exit(R),
 }
 
 #[macro_export]

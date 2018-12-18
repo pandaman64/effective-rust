@@ -35,7 +35,7 @@ impl Effect for SetStr {
 fn test_state() {
     let mut i = 42;
     let mut s = "hello".to_string();
-    handle(
+    run(
         eff! {
             println!("{}", perform!(GetInt));
             perform!(SetInt(53));

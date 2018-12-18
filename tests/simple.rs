@@ -9,7 +9,7 @@ impl Effect for Eff {
 
 #[test]
 fn test_simple() {
-    handle(
+    run(
         eff! {
             perform!(Eff)
         },

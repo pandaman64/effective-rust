@@ -11,7 +11,7 @@ impl Effect for ConversionError {
 }
 
 fn sum_up(s: String) -> usize {
-    handle(
+    run(
         eff! {
             let mut sum = 0_usize;
             for line in s.split('\n') {

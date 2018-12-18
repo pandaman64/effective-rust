@@ -37,7 +37,7 @@ fn test_example() {
         s.chars().nth(i1 + i2).unwrap()
     };
 
-    let result = handle(
+    let result = run(
         expr_with_effect,
         |x| x,
         handler! {
