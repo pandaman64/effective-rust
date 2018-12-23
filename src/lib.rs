@@ -1,6 +1,7 @@
 #![feature(nll, generators, generator_trait, unsized_locals)]
 #![feature(trace_macros)]
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
@@ -43,10 +44,10 @@ macro_rules! eff_muncher {
         eff_muncher!(@(($($top)* perform!($e)) $($stack)*) $($rest)*)
     };
 
-    // Replace `invoke!($e)` tokens with `invoke!($e)`.
-    // (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) invoke!($e:expr) $($rest:tt)*) => {
-    //     eff_muncher!(@(($($top)* invoke!($e)) $($stack)*) $($rest)*)
-    // };
+    // Replace `compose!($variant, $e)` tokens with `compose!($us, $variant, $e)`.
+    (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) compose!($e:expr) $($rest:tt)*) => {
+        eff_muncher!(@(($($top)* invoke!($e)) $($stack)*) $($rest)*)
+    };
 
     // Munch a token that is not `perform!` nor `invoke!`.
     (@(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
@@ -63,21 +64,43 @@ macro_rules! eff_muncher {
 macro_rules! eff {
     // Begin with an empty stack.
     ($($input:tt)+) => {{
-        Box::new(|| -> $crate::WithEffectInner<_, _, _> {
-            $crate::WithEffectInner {
-                inner: Box::new(
-                    #[allow(unreachable_code)]
-                    static move || {
-                        // This trick lets the compiler treat this closure
-                        // as a generator even if $input doesn't contain no perform
-                        // (no yield).
-                        // see: https://stackoverflow.com/a/53757228/8554666
-                        if false { yield unreachable!(); }
-                        eff_muncher!(@(()) $($input)*)
-                    }
-                )
-            }
-        })
+        $crate::WithEffectInner {
+            inner: Box::new(
+                #[allow(unreachable_code)]
+                static move || {
+                    // This trick lets the compiler treat this closure
+                    // as a generator even if $input doesn't contain no perform
+                    // (no yield).
+                    // see: https://stackoverflow.com/a/53757228/8554666
+                    if false { yield unreachable!(); }
+                    eff_muncher!(@(()) $($input)*)
+                }
+            )
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! eff_with_compose {
+    // Begin with an empty stack.
+    (<$($variant:ident @ $type:ty),*>, $($input:tt)+) => {{
+        enum Us {
+            $($variant($type)),*
+        }
+
+        $crate::WithEffectInner {
+            inner: Box::new(
+                #[allow(unreachable_code)]
+                static move || {
+                    // This trick lets the compiler treat this closure
+                    // as a generator even if $input doesn't contain no perform
+                    // (no yield).
+                    // see: https://stackoverflow.com/a/53757228/8554666
+                    if false { yield unreachable!(); }
+                    eff_muncher!(@(()) $($input)*)
+                }
+            )
+        }
     }};
 }
 
@@ -94,9 +117,33 @@ macro_rules! perform {
         let store = Store::new();
         let eff = $eff;
         let getter = __getter(&eff, store.clone());
-        yield (store.clone(), Into::into(eff));
+        yield $crate::Suspension::Perform(store.clone(), Into::into(eff));
         getter()
     }};
+}
+
+#[macro_export]
+macro_rules! compose {
+    ($eff:expr) => {{
+        use std::any::Any;
+        #[inline(always)]
+        fn __getter<E, U: Any, C>(
+            _: &WithEffectInner<E, U, C>,
+            store: $crate::ComposeStore,
+        ) -> impl FnOnce() -> U {
+            move || store.take::<U>()
+        }
+        let store = ComposeStore::new();
+        let eff = $eff;
+        let getter = __getter(&eff, store.clone());
+        yield $crate::Suspension::Compose(store.clone(), eff.map(|x| Box::new(x) as Box<dyn Any>));
+        getter()
+    }};
+}
+
+pub enum Suspension<E, C> {
+    Perform(Store<C>, E),
+    Compose(ComposeStore, WithEffectInner<E, Box<dyn Any>, C>),
 }
 
 pub trait Effect {
@@ -104,7 +151,47 @@ pub trait Effect {
 }
 
 pub struct WithEffectInner<E, T, C> {
-    pub inner: Box<dyn Generator<Yield = (C, E), Return = T>>,
+    pub inner: Box<dyn Generator<Yield = Suspension<E, C>, Return = T>>,
+}
+
+struct Map<E, T, C, F> {
+    inner: WithEffectInner<E, T, C>,
+    f: Option<F>,
+}
+
+impl<E, T, C, F, U> Generator for Map<E, T, C, F>
+where
+    F: FnOnce(T) -> U,
+{
+    type Yield = Suspension<E, C>;
+    type Return = U;
+
+    unsafe fn resume(&mut self) -> GeneratorState<Self::Yield, Self::Return> {
+        let state = self.inner.inner.resume();
+        match state {
+            GeneratorState::Complete(v) => {
+                let f = self.f.take().expect("Map::resume called after completion");
+                GeneratorState::Complete(f(v))
+            }
+            GeneratorState::Yielded(v) => GeneratorState::Yielded(v),
+        }
+    }
+}
+
+impl<E: 'static, T: 'static, C: 'static> WithEffectInner<E, T, C> {
+    pub fn map<F, U>(self, f: F) -> WithEffectInner<E, U, C>
+    where
+        F: FnOnce(T) -> U + 'static,
+    {
+        let mapped = Map {
+            inner: self,
+            f: Some(f),
+        };
+
+        WithEffectInner {
+            inner: Box::new(mapped),
+        }
+    }
 }
 
 pub trait Channel<E>
@@ -112,6 +199,31 @@ where
     E: Effect,
 {
     fn into(self) -> E::Output;
+}
+
+#[derive(Clone, Default)]
+pub struct ComposeStore {
+    pub inner: Rc<RefCell<Option<Box<dyn Any>>>>,
+}
+
+impl ComposeStore {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn set<V: Any>(&self, v: V) {
+        *self.inner.borrow_mut() = Some(Box::new(v));
+    }
+
+    pub fn take<V: Any>(&self) -> V {
+        *self
+            .inner
+            .borrow_mut()
+            .take()
+            .unwrap()
+            .downcast::<V>()
+            .unwrap()
+    }
 }
 
 #[derive(Debug)]
@@ -154,8 +266,37 @@ impl<C> Default for Store<C> {
     }
 }
 
+fn run_inner<E, U, C, H, R>(
+    mut expr: WithEffectInner<E, U, C>,
+    store: ComposeStore,
+    handler: &mut H,
+) -> Option<R>
+where
+    U: Any,
+    H: FnMut(E) -> HandlerResult<R, C>,
+{
+    loop {
+        let state = unsafe { expr.inner.resume() };
+        match state {
+            GeneratorState::Yielded(Suspension::Perform(store, effect)) => match handler(effect) {
+                HandlerResult::Resume(c) => store.set(c),
+                HandlerResult::Exit(v) => return Some(v),
+            },
+            GeneratorState::Yielded(Suspension::Compose(store, inner)) => {
+                if let Some(v) = run_inner(inner, store, handler) {
+                    return Some(v);
+                }
+            }
+            GeneratorState::Complete(v) => {
+                store.set(v);
+                return None;
+            }
+        }
+    }
+}
+
 pub fn run<E, T, C, H, VH, R>(
-    gen_func: Box<dyn FnOnce() -> WithEffectInner<E, T, Store<C>>>,
+    mut expr: WithEffectInner<E, T, C>,
     value_handler: VH,
     mut handler: H,
 ) -> R
@@ -163,15 +304,19 @@ where
     H: FnMut(E) -> HandlerResult<R, C> + 'static,
     VH: FnOnce(T) -> R,
 {
-    let mut expr = gen_func();
     loop {
         // this resume is safe since the generator is pinned in a heap
         let state = unsafe { expr.inner.resume() };
         match state {
-            GeneratorState::Yielded((store, effect)) => match handler(effect) {
+            GeneratorState::Yielded(Suspension::Perform(store, effect)) => match handler(effect) {
                 HandlerResult::Resume(c) => store.set(c),
                 HandlerResult::Exit(v) => return v,
             },
+            GeneratorState::Yielded(Suspension::Compose(store, inner)) => {
+                if let Some(v) = run_inner(inner, store, &mut handler) {
+                    return v;
+                }
+            }
             GeneratorState::Complete(v) => return value_handler(v),
         }
     }
