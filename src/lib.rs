@@ -9,52 +9,52 @@ use std::rc::Rc;
 #[macro_export]
 macro_rules! eff_muncher {
     // Open parenthesis.
-    (@$ctx:ident, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(() $($stack)*) $($first)* __paren $($rest)*)
+    (@($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
+        eff_muncher!(@(() $($stack)*) $($first)* __paren $($rest)*)
     };
 
     // Open square bracket.
-    (@$ctx:ident, @($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(() $($stack)*) $($first)* __bracket $($rest)*)
+    (@($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
+        eff_muncher!(@(() $($stack)*) $($first)* __bracket $($rest)*)
     };
 
     // Open brace.
-    (@$ctx:ident, @($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(() $($stack)*) $($first)* __brace $($rest)*)
+    (@($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
+        eff_muncher!(@(() $($stack)*) $($first)* __brace $($rest)*)
     };
 
     // Close parenthesis.
-    (@$ctx:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
+    (@(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
+        eff_muncher!(@(($($top)* ($($close)*)) $($stack)*) $($rest)*)
     };
 
     // Close square bracket.
-    (@$ctx:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
+    (@(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
+        eff_muncher!(@(($($top)* [$($close)*]) $($stack)*) $($rest)*)
     };
 
     // Close brace.
-    (@$ctx:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
+    (@(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
+        eff_muncher!(@(($($top)* {$($close)*}) $($stack)*) $($rest)*)
     };
 
-    // Replace `perform!($e)` tokens with `perform!(@$ctx, $e)`.
-    (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) perform!($e:expr) $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(($($top)* perform!(@$ctx, $e)) $($stack)*) $($rest)*)
+    // Replace `perform!($e)` tokens with `perform!($e)`.
+    (@(($($top:tt)*) $($stack:tt)*) perform!($e:expr) $($rest:tt)*) => {
+        eff_muncher!(@(($($top)* perform!($e)) $($stack)*) $($rest)*)
     };
 
-    // Replace `invoke!($e)` tokens with `invoke!(@$ctx, $e)`.
+    // Replace `invoke!($e)` tokens with `invoke!($e)`.
     // (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) invoke!($e:expr) $($rest:tt)*) => {
-    //     eff_muncher!(@$ctx, @(($($top)* invoke!(@$ctx, $e)) $($stack)*) $($rest)*)
+    //     eff_muncher!(@(($($top)* invoke!($e)) $($stack)*) $($rest)*)
     // };
 
     // Munch a token that is not `perform!` nor `invoke!`.
-    (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
-        eff_muncher!(@$ctx, @(($($top)* $first) $($stack)*) $($rest)*)
+    (@(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
+        eff_muncher!(@(($($top)* $first) $($stack)*) $($rest)*)
     };
 
     // Done.
-    (@$ctx:ident, @(($($top:tt)+))) => {{
+    (@(($($top:tt)+))) => {{
         $($top)+
     }};
 }
@@ -63,7 +63,7 @@ macro_rules! eff_muncher {
 macro_rules! eff {
     // Begin with an empty stack.
     ($($input:tt)+) => {{
-        Box::new(|store: $crate::Store<_>| -> $crate::WithEffectInner<_, _> {
+        Box::new(|| -> $crate::WithEffectInner<_, _, _> {
             $crate::WithEffectInner {
                 inner: Box::new(
                     #[allow(unreachable_code)]
@@ -73,7 +73,7 @@ macro_rules! eff {
                         // (no yield).
                         // see: https://stackoverflow.com/a/53757228/8554666
                         if false { yield unreachable!(); }
-                        eff_muncher!(@store, @(()) $($input)*)
+                        eff_muncher!(@(()) $($input)*)
                     }
                 )
             }
@@ -83,7 +83,7 @@ macro_rules! eff {
 
 #[macro_export]
 macro_rules! perform {
-    (@$store:ident, $eff:expr) => {{
+    ($eff:expr) => {{
         #[inline(always)]
         fn __getter<'e, 'c, E: $crate::Effect, C: $crate::Channel<E> + 'c>(
             _: &'e E,
@@ -91,9 +91,10 @@ macro_rules! perform {
         ) -> impl FnOnce() -> <E as $crate::Effect>::Output + 'c {
             move || store.get::<E>()
         }
+        let store = Store::new();
         let eff = $eff;
-        let getter = __getter(&eff, $store.clone());
-        yield Into::into(eff);
+        let getter = __getter(&eff, store.clone());
+        yield (store.clone(), Into::into(eff));
         getter()
     }};
 }
@@ -102,8 +103,8 @@ pub trait Effect {
     type Output;
 }
 
-pub struct WithEffectInner<E, T> {
-    pub inner: Box<dyn Generator<Yield = E, Return = T>>,
+pub struct WithEffectInner<E, T, C> {
+    pub inner: Box<dyn Generator<Yield = (C, E), Return = T>>,
 }
 
 pub trait Channel<E>
@@ -119,7 +120,7 @@ pub struct Store<C> {
 }
 
 impl<C> Store<C> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Default::default()
     }
 
@@ -154,7 +155,7 @@ impl<C> Default for Store<C> {
 }
 
 pub fn run<E, T, C, H, VH, R>(
-    gen_func: Box<dyn FnOnce(Store<C>) -> WithEffectInner<E, T>>,
+    gen_func: Box<dyn FnOnce() -> WithEffectInner<E, T, Store<C>>>,
     value_handler: VH,
     mut handler: H,
 ) -> R
@@ -162,13 +163,12 @@ where
     H: FnMut(E) -> HandlerResult<R, C> + 'static,
     VH: FnOnce(T) -> R,
 {
-    let store = Store::new();
-    let mut expr = gen_func(store.clone());
+    let mut expr = gen_func();
     loop {
         // this resume is safe since the generator is pinned in a heap
         let state = unsafe { expr.inner.resume() };
         match state {
-            GeneratorState::Yielded(effect) => match handler(effect) {
+            GeneratorState::Yielded((store, effect)) => match handler(effect) {
                 HandlerResult::Resume(c) => store.set(c),
                 HandlerResult::Exit(v) => return v,
             },
