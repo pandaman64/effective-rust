@@ -1,7 +1,6 @@
 #![feature(nll, generators, generator_trait, unsized_locals)]
 #![feature(trace_macros)]
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
@@ -10,52 +9,52 @@ use std::rc::Rc;
 #[macro_export]
 macro_rules! eff_muncher {
     // Open parenthesis.
-    (@($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
-        eff_muncher!(@(() $($stack)*) $($first)* __paren $($rest)*)
+    ($us:ident, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
+        eff_muncher!($us, @(() $($stack)*) $($first)* __paren $($rest)*)
     };
 
     // Open square bracket.
-    (@($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
-        eff_muncher!(@(() $($stack)*) $($first)* __bracket $($rest)*)
+    ($us:ident, @($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
+        eff_muncher!($us, @(() $($stack)*) $($first)* __bracket $($rest)*)
     };
 
     // Open brace.
-    (@($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
-        eff_muncher!(@(() $($stack)*) $($first)* __brace $($rest)*)
+    ($us:ident, @($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
+        eff_muncher!($us, @(() $($stack)*) $($first)* __brace $($rest)*)
     };
 
     // Close parenthesis.
-    (@(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
-        eff_muncher!(@(($($top)* ($($close)*)) $($stack)*) $($rest)*)
+    ($us:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
+        eff_muncher!($us, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
     };
 
     // Close square bracket.
-    (@(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
-        eff_muncher!(@(($($top)* [$($close)*]) $($stack)*) $($rest)*)
+    ($us:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
+        eff_muncher!($us, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
     };
 
     // Close brace.
-    (@(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
-        eff_muncher!(@(($($top)* {$($close)*}) $($stack)*) $($rest)*)
+    ($us:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
+        eff_muncher!($us, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
     };
 
     // Replace `perform!($e)` tokens with `perform!($e)`.
-    (@(($($top:tt)*) $($stack:tt)*) perform!($e:expr) $($rest:tt)*) => {
-        eff_muncher!(@(($($top)* perform!($e)) $($stack)*) $($rest)*)
+    ($us:ident, @(($($top:tt)*) $($stack:tt)*) perform!($e:expr) $($rest:tt)*) => {
+        eff_muncher!($us, @(($($top)* perform!($e)) $($stack)*) $($rest)*)
     };
 
     // Replace `compose!($variant, $e)` tokens with `compose!($us, $variant, $e)`.
-    (@$ctx:ident, @(($($top:tt)*) $($stack:tt)*) compose!($e:expr) $($rest:tt)*) => {
-        eff_muncher!(@(($($top)* invoke!($e)) $($stack)*) $($rest)*)
+    ($us:ident, @(($($top:tt)*) $($stack:tt)*) compose!($variant:ident, $e:expr) $($rest:tt)*) => {
+        eff_muncher!($us, @(($($top)* compose!($us, $variant, $e)) $($stack)*) $($rest)*)
     };
 
     // Munch a token that is not `perform!` nor `invoke!`.
-    (@(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
-        eff_muncher!(@(($($top)* $first) $($stack)*) $($rest)*)
+    ($us:ident, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
+        eff_muncher!($us, @(($($top)* $first) $($stack)*) $($rest)*)
     };
 
     // Done.
-    (@(($($top:tt)+))) => {{
+    ($us:ident, @(($($top:tt)+))) => {{
         $($top)+
     }};
 }
@@ -64,6 +63,8 @@ macro_rules! eff_muncher {
 macro_rules! eff {
     // Begin with an empty stack.
     ($($input:tt)+) => {{
+        enum Us {}
+
         $crate::WithEffectInner {
             inner: Box::new(
                 #[allow(unreachable_code)]
@@ -73,7 +74,7 @@ macro_rules! eff {
                     // (no yield).
                     // see: https://stackoverflow.com/a/53757228/8554666
                     if false { yield unreachable!(); }
-                    eff_muncher!(@(()) $($input)*)
+                    eff_muncher!(Us, @(()) $($input)*)
                 }
             )
         }
@@ -88,6 +89,14 @@ macro_rules! eff_with_compose {
             $($variant($type)),*
         }
 
+        $(
+            impl From<$type> for Us {
+                fn from(v: $type) -> Self {
+                    Us::$variant(v)
+                }
+            }
+        )*
+
         $crate::WithEffectInner {
             inner: Box::new(
                 #[allow(unreachable_code)]
@@ -97,7 +106,7 @@ macro_rules! eff_with_compose {
                     // (no yield).
                     // see: https://stackoverflow.com/a/53757228/8554666
                     if false { yield unreachable!(); }
-                    eff_muncher!(@(()) $($input)*)
+                    eff_muncher!(Us, @(()) $($input)*)
                 }
             )
         }
@@ -124,74 +133,31 @@ macro_rules! perform {
 
 #[macro_export]
 macro_rules! compose {
-    ($eff:expr) => {{
-        use std::any::Any;
-        #[inline(always)]
-        fn __getter<E, U: Any, C>(
-            _: &WithEffectInner<E, U, C>,
-            store: $crate::ComposeStore,
-        ) -> impl FnOnce() -> U {
-            move || store.take::<U>()
-        }
+    ($Us:ident, $variant:ident, $eff:expr) => {{
         let store = ComposeStore::new();
+        let store2 = store.clone();
         let eff = $eff;
-        let getter = __getter(&eff, store.clone());
-        yield $crate::Suspension::Compose(store.clone(), eff.map(|x| Box::new(x) as Box<dyn Any>));
-        getter()
+        yield $crate::Suspension::Compose(Box::new(move |handler| {
+            $crate::run_inner(eff, store, handler)
+        }));
+        match store2.take() {
+            $Us::$variant(v) => v,
+            _ => unreachable!(),
+        }
     }};
 }
 
-pub enum Suspension<E, C> {
+pub enum Suspension<E, C, R> {
     Perform(Store<C>, E),
-    Compose(ComposeStore, WithEffectInner<E, Box<dyn Any>, C>),
+    Compose(Box<FnOnce(&mut FnMut(E) -> HandlerResult<R, C>) -> Option<R>>),
 }
 
 pub trait Effect {
     type Output;
 }
 
-pub struct WithEffectInner<E, T, C> {
-    pub inner: Box<dyn Generator<Yield = Suspension<E, C>, Return = T>>,
-}
-
-struct Map<E, T, C, F> {
-    inner: WithEffectInner<E, T, C>,
-    f: Option<F>,
-}
-
-impl<E, T, C, F, U> Generator for Map<E, T, C, F>
-where
-    F: FnOnce(T) -> U,
-{
-    type Yield = Suspension<E, C>;
-    type Return = U;
-
-    unsafe fn resume(&mut self) -> GeneratorState<Self::Yield, Self::Return> {
-        let state = self.inner.inner.resume();
-        match state {
-            GeneratorState::Complete(v) => {
-                let f = self.f.take().expect("Map::resume called after completion");
-                GeneratorState::Complete(f(v))
-            }
-            GeneratorState::Yielded(v) => GeneratorState::Yielded(v),
-        }
-    }
-}
-
-impl<E: 'static, T: 'static, C: 'static> WithEffectInner<E, T, C> {
-    pub fn map<F, U>(self, f: F) -> WithEffectInner<E, U, C>
-    where
-        F: FnOnce(T) -> U + 'static,
-    {
-        let mapped = Map {
-            inner: self,
-            f: Some(f),
-        };
-
-        WithEffectInner {
-            inner: Box::new(mapped),
-        }
-    }
+pub struct WithEffectInner<E, T, C, R> {
+    pub inner: Box<dyn Generator<Yield = Suspension<E, C, R>, Return = T>>,
 }
 
 pub trait Channel<E>
@@ -201,28 +167,37 @@ where
     fn into(self) -> E::Output;
 }
 
-#[derive(Clone, Default)]
-pub struct ComposeStore {
-    pub inner: Rc<RefCell<Option<Box<dyn Any>>>>,
+pub struct ComposeStore<U> {
+    pub inner: Rc<RefCell<Option<U>>>,
 }
 
-impl ComposeStore {
+impl<U> Clone for ComposeStore<U> {
+    fn clone(&self) -> Self {
+        ComposeStore {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<U> Default for ComposeStore<U> {
+    fn default() -> Self {
+        ComposeStore {
+            inner: Default::default(),
+        }
+    }
+}
+
+impl<U> ComposeStore<U> {
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn set<V: Any>(&self, v: V) {
-        *self.inner.borrow_mut() = Some(Box::new(v));
+    pub fn set(&self, v: U) {
+        *self.inner.borrow_mut() = Some(v);
     }
 
-    pub fn take<V: Any>(&self) -> V {
-        *self
-            .inner
-            .borrow_mut()
-            .take()
-            .unwrap()
-            .downcast::<V>()
-            .unwrap()
+    pub fn take(&self) -> U {
+        self.inner.borrow_mut().take().unwrap()
     }
 }
 
@@ -266,14 +241,13 @@ impl<C> Default for Store<C> {
     }
 }
 
-fn run_inner<E, U, C, H, R>(
-    mut expr: WithEffectInner<E, U, C>,
-    store: ComposeStore,
-    handler: &mut H,
+pub fn run_inner<E, U, Us, C, R>(
+    mut expr: WithEffectInner<E, U, C, R>,
+    store: ComposeStore<Us>,
+    handler: &mut FnMut(E) -> HandlerResult<R, C>,
 ) -> Option<R>
 where
-    U: Any,
-    H: FnMut(E) -> HandlerResult<R, C>,
+    U: Into<Us>,
 {
     loop {
         let state = unsafe { expr.inner.resume() };
@@ -282,13 +256,11 @@ where
                 HandlerResult::Resume(c) => store.set(c),
                 HandlerResult::Exit(v) => return Some(v),
             },
-            GeneratorState::Yielded(Suspension::Compose(store, inner)) => {
-                if let Some(v) = run_inner(inner, store, handler) {
-                    return Some(v);
-                }
+            GeneratorState::Yielded(Suspension::Compose(f)) => {
+                return f(handler);
             }
             GeneratorState::Complete(v) => {
-                store.set(v);
+                store.set(v.into());
                 return None;
             }
         }
@@ -296,7 +268,7 @@ where
 }
 
 pub fn run<E, T, C, H, VH, R>(
-    mut expr: WithEffectInner<E, T, C>,
+    mut expr: WithEffectInner<E, T, C, R>,
     value_handler: VH,
     mut handler: H,
 ) -> R
@@ -312,8 +284,8 @@ where
                 HandlerResult::Resume(c) => store.set(c),
                 HandlerResult::Exit(v) => return v,
             },
-            GeneratorState::Yielded(Suspension::Compose(store, inner)) => {
-                if let Some(v) = run_inner(inner, store, &mut handler) {
+            GeneratorState::Yielded(Suspension::Compose(f)) => {
+                if let Some(v) = f(&mut handler) {
                     return v;
                 }
             }
