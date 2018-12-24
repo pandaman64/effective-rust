@@ -27,10 +27,11 @@ fn test_compose() {
     let expr = eff_with_compose!(
         <H @ u32, F @ u64>,
         {
-        let hoge = compose!(H, foo);
-        let fuga = compose!(F, bar);
-        u64::from(hoge) + fuga
-    });
+            let hoge = compose!(H, foo);
+            let fuga = compose!(F, bar);
+            u64::from(hoge) + fuga
+        }
+    );
 
     run(
         expr,
