@@ -4,4 +4,9 @@ version = "0.0.1"
 authors = ["pan"]
 edition = "2018"
 
+description = "Algebraic Effects Library for Rust"
+repository = "https://github.com/pandaman64/effective-rust/"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
 [dependencies]
