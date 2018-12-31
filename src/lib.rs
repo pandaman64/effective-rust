@@ -66,17 +66,14 @@ macro_rules! eff {
         enum Us {}
 
         $crate::WithEffectInner {
-            inner: Box::new(
-                #[allow(unreachable_code)]
-                static move || {
-                    // This trick lets the compiler treat this closure
-                    // as a generator even if $input doesn't contain no perform
-                    // (no yield).
-                    // see: https://stackoverflow.com/a/53757228/8554666
-                    if false { yield unreachable!(); }
-                    eff_muncher!(Us, @(()) $($input)*)
-                }
-            )
+            inner: static move || {
+                // This trick lets the compiler treat this closure
+                // as a generator even if $input doesn't contain no perform
+                // (no yield).
+                // see: https://stackoverflow.com/a/53757228/8554666
+                if false { yield unreachable!(); }
+                eff_muncher!(Us, @(()) $($input)*)
+            }
         }
     }};
 }
@@ -98,17 +95,14 @@ macro_rules! eff_with_compose {
         )*
 
         $crate::WithEffectInner {
-            inner: Box::new(
-                #[allow(unreachable_code)]
-                static move || {
-                    // This trick lets the compiler treat this closure
-                    // as a generator even if $input doesn't contain no perform
-                    // (no yield).
-                    // see: https://stackoverflow.com/a/53757228/8554666
-                    if false { yield unreachable!(); }
-                    eff_muncher!(Us, @(()) $($input)*)
-                }
-            )
+            inner: static move || {
+                // This trick lets the compiler treat this closure
+                // as a generator even if $input doesn't contain no perform
+                // (no yield).
+                // see: https://stackoverflow.com/a/53757228/8554666
+                if false { yield unreachable!(); }
+                eff_muncher!(Us, @(()) $($input)*)
+            }
         }
     }};
 }
@@ -156,8 +150,8 @@ pub trait Effect {
     type Output;
 }
 
-pub struct WithEffectInner<E, T, C, R> {
-    pub inner: Box<dyn Generator<Yield = Suspension<E, C, R>, Return = T>>,
+pub struct WithEffectInner<G> {
+    pub inner: G,
 }
 
 pub trait Channel<E>
@@ -241,12 +235,13 @@ impl<C> Default for Store<C> {
     }
 }
 
-pub fn run_inner<E, U, Us, C, R>(
-    mut expr: WithEffectInner<E, U, C, R>,
+pub fn run_inner<G, E, U, Us, C, R>(
+    mut expr: WithEffectInner<G>,
     store: ComposeStore<Us>,
     handler: &mut FnMut(E) -> HandlerResult<R, C>,
 ) -> Option<R>
 where
+    G: Generator<Yield = Suspension<E, C, R>, Return = U>,
     U: Into<Us>,
 {
     loop {
@@ -267,12 +262,13 @@ where
     }
 }
 
-pub fn run<E, T, C, H, VH, R>(
-    mut expr: WithEffectInner<E, T, C, R>,
+pub fn run<G, E, T, C, H, VH, R>(
+    mut expr: WithEffectInner<G>,
     value_handler: VH,
     mut handler: H,
 ) -> R
 where
+    G: Generator<Yield = Suspension<E, C, R>, Return = T>,
     H: FnMut(E) -> HandlerResult<R, C> + 'static,
     VH: FnOnce(T) -> R,
 {
