@@ -5,105 +5,21 @@ use std::cell::RefCell;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
 
-// https://users.rust-lang.org/t/macro-to-replace-type-parameters/17903
-#[macro_export]
-macro_rules! eff_muncher {
-    // Open parenthesis.
-    ($us:ident, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
-        eff_muncher!($us, @(() $($stack)*) $($first)* __paren $($rest)*)
-    };
-
-    // Open square bracket.
-    ($us:ident, @($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
-        eff_muncher!($us, @(() $($stack)*) $($first)* __bracket $($rest)*)
-    };
-
-    // Open brace.
-    ($us:ident, @($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
-        eff_muncher!($us, @(() $($stack)*) $($first)* __brace $($rest)*)
-    };
-
-    // Close parenthesis.
-    ($us:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
-        eff_muncher!($us, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
-    };
-
-    // Close square bracket.
-    ($us:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
-        eff_muncher!($us, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
-    };
-
-    // Close brace.
-    ($us:ident, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
-        eff_muncher!($us, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
-    };
-
-    // Replace `perform!($e)` tokens with `perform!($e)`.
-    ($us:ident, @(($($top:tt)*) $($stack:tt)*) perform!($e:expr) $($rest:tt)*) => {
-        eff_muncher!($us, @(($($top)* perform!($e)) $($stack)*) $($rest)*)
-    };
-
-    // Replace `compose!($variant, $e)` tokens with `compose!($us, $variant, $e)`.
-    ($us:ident, @(($($top:tt)*) $($stack:tt)*) compose!($variant:ident, $e:expr) $($rest:tt)*) => {
-        eff_muncher!($us, @(($($top)* compose!($us, $variant, $e)) $($stack)*) $($rest)*)
-    };
-
-    // Munch a token that is not `perform!` nor `invoke!`.
-    ($us:ident, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
-        eff_muncher!($us, @(($($top)* $first) $($stack)*) $($rest)*)
-    };
-
-    // Done.
-    ($us:ident, @(($($top:tt)+))) => {{
-        $($top)+
-    }};
-}
-
 #[macro_export]
 macro_rules! eff {
     // Begin with an empty stack.
     ($($input:tt)+) => {{
-        enum Us {}
-
-        $crate::WithEffectInner {
-            inner: static move || {
+        $crate::WithEffectInner::new(
+            #[allow(unreachable_code)]
+            static move || {
                 // This trick lets the compiler treat this closure
                 // as a generator even if $input doesn't contain no perform
                 // (no yield).
                 // see: https://stackoverflow.com/a/53757228/8554666
                 if false { yield unreachable!(); }
-                eff_muncher!(Us, @(()) $($input)*)
+                $($input)+
             }
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! eff_with_compose {
-    // Begin with an empty stack.
-    (<$($variant:ident @ $type:ty),*>, $($input:tt)+) => {{
-        enum Us {
-            $($variant($type)),*
-        }
-
-        $(
-            impl From<$type> for Us {
-                fn from(v: $type) -> Self {
-                    Us::$variant(v)
-                }
-            }
-        )*
-
-        $crate::WithEffectInner {
-            inner: static move || {
-                // This trick lets the compiler treat this closure
-                // as a generator even if $input doesn't contain no perform
-                // (no yield).
-                // see: https://stackoverflow.com/a/53757228/8554666
-                if false { yield unreachable!(); }
-                eff_muncher!(Us, @(()) $($input)*)
-            }
-        }
+        )
     }};
 }
 
@@ -127,17 +43,14 @@ macro_rules! perform {
 
 #[macro_export]
 macro_rules! compose {
-    ($Us:ident, $variant:ident, $eff:expr) => {{
+    ($eff:expr) => {{
         let store = ComposeStore::new();
         let store2 = store.clone();
         let eff = $eff;
         yield $crate::Suspension::Compose(Box::new(move |handler| {
             $crate::run_inner(eff, store, handler)
         }));
-        match store2.take() {
-            $Us::$variant(v) => v,
-            _ => unreachable!(),
-        }
+        store2.take()
     }};
 }
 
@@ -150,8 +63,18 @@ pub trait Effect {
     type Output;
 }
 
-pub struct WithEffectInner<G> {
+pub struct WithEffectInner<PE, G> {
     pub inner: G,
+    phantom: std::marker::PhantomData<fn() -> PE>,
+}
+
+impl<PE, G> WithEffectInner<PE, G> {
+    pub fn new(inner: G) -> Self {
+        WithEffectInner {
+            inner,
+            phantom: std::marker::PhantomData,
+        }
+    }
 }
 
 pub trait Channel<E>
@@ -235,14 +158,13 @@ impl<C> Default for Store<C> {
     }
 }
 
-pub fn run_inner<G, E, U, Us, C, R>(
-    mut expr: WithEffectInner<G>,
-    store: ComposeStore<Us>,
+pub fn run_inner<G, E, U, C, R>(
+    mut expr: WithEffectInner<E, G>,
+    store: ComposeStore<U>,
     handler: &mut FnMut(E) -> HandlerResult<R, C>,
 ) -> Option<R>
 where
     G: Generator<Yield = Suspension<E, C, R>, Return = U>,
-    U: Into<Us>,
 {
     loop {
         let state = unsafe { expr.inner.resume() };
@@ -263,7 +185,7 @@ where
 }
 
 pub fn run<G, E, T, C, H, VH, R>(
-    mut expr: WithEffectInner<G>,
+    mut expr: WithEffectInner<E, G>,
     value_handler: VH,
     mut handler: H,
 ) -> R
@@ -295,6 +217,7 @@ pub enum HandlerResult<R, C> {
     Exit(R),
 }
 
+// https://users.rust-lang.org/t/macro-to-replace-type-parameters/17903
 #[macro_export]
 macro_rules! handler_muncher {
     // Open parenthesis.
