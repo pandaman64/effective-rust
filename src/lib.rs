@@ -2,6 +2,7 @@
 #![feature(trace_macros)]
 
 use std::cell::RefCell;
+use std::marker::PhantomData;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
 
@@ -33,7 +34,7 @@ macro_rules! perform {
         ) -> impl FnOnce() -> <E as $crate::Effect>::Output + 'c {
             move || store.get::<E>()
         }
-        let store = Store::new();
+        let store = $crate::Store::new();
         let eff = $eff;
         let getter = __getter(&eff, store.clone());
         yield $crate::Suspension::Perform(store.clone(), Into::into(eff));
@@ -44,7 +45,7 @@ macro_rules! perform {
 #[macro_export]
 macro_rules! compose {
     ($eff:expr) => {{
-        let store = ComposeStore::new();
+        let store = $crate::ComposeStore::new();
         let store2 = store.clone();
         let eff = $eff;
         yield $crate::Suspension::Compose(Box::new(move |handler| {
@@ -63,16 +64,16 @@ pub trait Effect {
     type Output;
 }
 
-pub struct WithEffectInner<PE, G> {
+pub struct WithEffectInner<PE, PC, G> {
     pub inner: G,
-    phantom: std::marker::PhantomData<fn() -> PE>,
+    phantom: PhantomData<fn() -> (PE, PC)>,
 }
 
-impl<PE, G> WithEffectInner<PE, G> {
+impl<PE, PC, G> WithEffectInner<PE, PC, G> {
     pub fn new(inner: G) -> Self {
         WithEffectInner {
             inner,
-            phantom: std::marker::PhantomData,
+            phantom: PhantomData,
         }
     }
 }
@@ -81,6 +82,7 @@ pub trait Channel<E>
 where
     E: Effect,
 {
+    fn from(v: E::Output) -> Self;
     fn into(self) -> E::Output;
 }
 
@@ -159,7 +161,7 @@ impl<C> Default for Store<C> {
 }
 
 pub fn run_inner<G, E, U, C, R>(
-    mut expr: WithEffectInner<E, G>,
+    mut expr: WithEffectInner<E, C, G>,
     store: ComposeStore<U>,
     handler: &mut FnMut(E) -> HandlerResult<R, C>,
 ) -> Option<R>
@@ -172,6 +174,7 @@ where
             GeneratorState::Yielded(Suspension::Perform(store, effect)) => match handler(effect) {
                 HandlerResult::Resume(c) => store.set(c),
                 HandlerResult::Exit(v) => return Some(v),
+                HandlerResult::Unhandled => panic!("effect unhandled"),
             },
             GeneratorState::Yielded(Suspension::Compose(f)) => {
                 return f(handler);
@@ -185,7 +188,7 @@ where
 }
 
 pub fn run<G, E, T, C, H, VH, R>(
-    mut expr: WithEffectInner<E, G>,
+    mut expr: WithEffectInner<E, C, G>,
     value_handler: VH,
     mut handler: H,
 ) -> R
@@ -201,6 +204,7 @@ where
             GeneratorState::Yielded(Suspension::Perform(store, effect)) => match handler(effect) {
                 HandlerResult::Resume(c) => store.set(c),
                 HandlerResult::Exit(v) => return v,
+                HandlerResult::Unhandled => panic!("effect unhandled"),
             },
             GeneratorState::Yielded(Suspension::Compose(f)) => {
                 if let Some(v) = f(&mut handler) {
@@ -215,6 +219,7 @@ where
 pub enum HandlerResult<R, C> {
     Resume(C),
     Exit(R),
+    Unhandled,
 }
 
 // https://users.rust-lang.org/t/macro-to-replace-type-parameters/17903
@@ -295,7 +300,11 @@ macro_rules! handler {
 
         $(
             impl $crate::Channel<$eff_type> for Channels {
-                fn into(self) -> <$eff_type as Effect>::Output {
+                fn from(v: <$eff_type as eff::Effect>::Output) -> Self {
+                    Channels::$variant(v)
+                }
+
+                fn into(self) -> <$eff_type as eff::Effect>::Output {
                     match self {
                         Channels::$variant(x) => x,
                         _ => unreachable!(),
