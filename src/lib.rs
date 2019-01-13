@@ -323,3 +323,14 @@ macro_rules! handler {
         }
     }};
 }
+
+#[proc_macro_hack::proc_macro_hack]
+pub use eff_attr::nonexhaustive_handler;
+
+#[macro_export]
+macro_rules! new_resume {
+    (@$eff_type:ty, $e:expr) => {{
+        return eff::HandlerResult::Resume(eff::Channel::<$eff_type>::from($e));
+        unreachable!()
+    }};
+}

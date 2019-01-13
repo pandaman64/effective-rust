@@ -1,12 +1,4 @@
 [[package]]
-name = "eff"
-version = "0.0.2-alpha.0"
-dependencies = [
- "eff-attr 0.0.1",
- "proc-macro-hack 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "eff-attr"
 version = "0.0.1"
 dependencies = [
