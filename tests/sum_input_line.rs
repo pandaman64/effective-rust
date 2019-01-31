@@ -1,6 +1,6 @@
 //! 1.1. Recovering from errors
 
-#![feature(generators)]
+#![feature(generators, generator_trait, try_from)]
 
 use eff::*;
 
@@ -11,21 +11,24 @@ impl Effect for ConversionError {
 }
 
 fn sum_up(s: String) -> usize {
-    run(
-        eff! {
-            let mut sum = 0_usize;
-            for line in s.split('\n') {
-                sum += match line.parse() {
-                    Ok(x) => x,
-                    Err(_e) => perform!(ConversionError(line.to_string())),
-                }
+    #[eff(ConversionError)]
+    fn read(s: String) -> usize {
+        let mut sum = 0_usize;
+        for line in s.split('\n') {
+            sum += match line.parse() {
+                Ok(x) => x,
+                Err(_e) => perform!(ConversionError(line.to_string())),
             }
-            sum
-        },
+        }
+        sum
+    }
+
+    run(
+        read(s),
         |x| x,
         handler! {
-            A @ ConversionError[eff] => {
-                println!("conversion error: {}", eff.0);
+            ConversionError(err) => {
+                println!("conversion error: {}", err);
                 resume!(0)
             }
         },

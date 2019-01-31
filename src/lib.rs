@@ -6,23 +6,7 @@ use std::marker::PhantomData;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
 
-#[macro_export]
-macro_rules! eff {
-    // Begin with an empty stack.
-    ($($input:tt)+) => {{
-        $crate::WithEffectInner::new(
-            #[allow(unreachable_code)]
-            static move || {
-                // This trick lets the compiler treat this closure
-                // as a generator even if $input doesn't contain no perform
-                // (no yield).
-                // see: https://stackoverflow.com/a/53757228/8554666
-                if false { yield unreachable!(); }
-                $($input)+
-            }
-        )
-    }};
-}
+pub use eff_attr::eff;
 
 #[macro_export]
 macro_rules! perform {
@@ -52,6 +36,23 @@ macro_rules! compose {
             $crate::run_inner(eff, store, handler)
         }));
         store2.take()
+    }};
+}
+
+#[proc_macro_hack::proc_macro_hack]
+pub use eff_attr::handler;
+
+#[macro_export]
+macro_rules! resume {
+    (@$eff_type:ty, $e:expr) => {{
+        return eff::HandlerResult::Resume(eff::Channel::<$eff_type>::from($e))
+    }};
+}
+
+#[macro_export]
+macro_rules! exit {
+    ($e:expr) => {{
+        return eff::HandlerResult::Exit($e)
     }};
 }
 
@@ -199,6 +200,8 @@ where
 {
     loop {
         // this resume is safe since the generator is pinned in a heap
+        // FIXME: the above line is not the case since G might be &mut Generator.
+        // Wait until pinning API arrives
         let state = unsafe { expr.inner.resume() };
         match state {
             GeneratorState::Yielded(Suspension::Perform(store, effect)) => match handler(effect) {
@@ -220,117 +223,4 @@ pub enum HandlerResult<R, C> {
     Resume(C),
     Exit(R),
     Unhandled,
-}
-
-// https://users.rust-lang.org/t/macro-to-replace-type-parameters/17903
-#[macro_export]
-macro_rules! handler_muncher {
-    // Open parenthesis.
-    (@$store:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) ($($first:tt)*) $($rest:tt)*) => {
-        handler_muncher!(@$store, @$variant, @$ctx, @(() $($stack)*) $($first)* __paren $($rest)*)
-    };
-
-    // Open square bracket.
-    (@$store:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) [$($first:tt)*] $($rest:tt)*) => {
-        handler_muncher!(@$store, @$variant, @$ctx, @(() $($stack)*) $($first)* __bracket $($rest)*)
-    };
-
-    // Open brace.
-    (@$store:ident, @$variant:ident, @$ctx:ty, @($($stack:tt)*) {$($first:tt)*} $($rest:tt)*) => {
-        handler_muncher!(@$store, @$variant, @$ctx, @(() $($stack)*) $($first)* __brace $($rest)*)
-    };
-
-    // Close parenthesis.
-    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __paren $($rest:tt)*) => {
-        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* ($($close)*)) $($stack)*) $($rest)*)
-    };
-
-    // Close square bracket.
-    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __bracket $($rest:tt)*) => {
-        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* [$($close)*]) $($stack)*) $($rest)*)
-    };
-
-    // Close brace.
-    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($close:tt)*) ($($top:tt)*) $($stack:tt)*) __brace $($rest:tt)*) => {
-        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* {$($close)*}) $($stack)*) $($rest)*)
-    };
-
-    // Replace `resume!($e)` tokens with `resume!(@$store, $variant, $ctx, $e)`.
-    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) resume!($e:expr) $($rest:tt)*) => {
-        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* resume!(@$store, @$variant, @$ctx, $e)) $($stack)*) $($rest)*)
-    };
-
-    // Munch a token that is not `resume!`.
-    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)*) $($stack:tt)*) $first:tt $($rest:tt)*) => {
-        handler_muncher!(@$store, @$variant, @$ctx, @(($($top)* $first) $($stack)*) $($rest)*)
-    };
-
-    // Done.
-    (@$store:ident, @$variant:ident, @$ctx:ty, @(($($top:tt)+))) => {{
-        $($top)+
-    }};
-}
-
-#[macro_export]
-macro_rules! resume {
-    (@$store:ident, @$variant:ident, @$ctx:ty, $e:expr) => {{
-        return $crate::HandlerResult::Resume($store::$variant($e));
-        unreachable!()
-    }};
-}
-
-#[macro_export]
-macro_rules! handler {
-    ( $($variant:ident @ $eff_type:ty [ $eff:pat ] => $e:tt),* ) => {{
-        enum Effects {
-            $($variant($eff_type),)*
-        }
-
-        $(
-            impl From<$eff_type> for Effects {
-                fn from(v: $eff_type) -> Self {
-                    Effects::$variant(v)
-                }
-            }
-        )*
-
-        enum Channels {
-            $($variant(<$eff_type as Effect>::Output),)*
-        }
-
-        $(
-            impl $crate::Channel<$eff_type> for Channels {
-                fn from(v: <$eff_type as eff::Effect>::Output) -> Self {
-                    Channels::$variant(v)
-                }
-
-                fn into(self) -> <$eff_type as eff::Effect>::Output {
-                    match self {
-                        Channels::$variant(x) => x,
-                        _ => unreachable!(),
-                    }
-                }
-            }
-        )*
-
-        #[allow(unreachable_code)]
-        move |eff: Effects| match eff {
-            $(
-                Effects::$variant($eff) => {
-                    $crate::HandlerResult::Exit(handler_muncher!(@Channels, @$variant, @$eff_type, @(()) $e))
-                }
-            )*
-        }
-    }};
-}
-
-#[proc_macro_hack::proc_macro_hack]
-pub use eff_attr::nonexhaustive_handler;
-
-#[macro_export]
-macro_rules! new_resume {
-    (@$eff_type:ty, $e:expr) => {{
-        return eff::HandlerResult::Resume(eff::Channel::<$eff_type>::from($e));
-        unreachable!()
-    }};
 }

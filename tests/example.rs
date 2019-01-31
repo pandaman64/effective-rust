@@ -1,12 +1,9 @@
-#![feature(generators, never_type)]
+#![feature(generators, generator_trait, try_from, never_type)]
 
 use eff::*;
 
 #[derive(Debug)]
-enum Foo {
-    This(usize),
-    That(usize),
-}
+struct Foo(usize);
 impl Effect for Foo {
     type Output = usize;
 }
@@ -27,37 +24,36 @@ mod effects {
 
 #[test]
 fn test_example() {
-    let expr_with_effect = eff! {
-        let i1 = perform!(Foo::This(1));
-        let i2 = perform!(Foo::That(3));
+    #[eff(Foo, Bar, effects::Baz)]
+    fn expr_with_effect() -> char {
+        let i1 = perform!(Foo(1));
+        let i2 = perform!(Foo(4));
         let s = perform!(Bar);
         if i1 + i2 >= s.len() {
             perform!(effects::Baz);
         }
         s.chars().nth(i1 + i2).unwrap()
-    };
+    }
 
     let result = run(
-        expr_with_effect,
+        expr_with_effect(),
         |x| x,
         handler! {
-            A @ Foo[foo] => {
+            -> char,
+            Foo(idx) => {
                 println!("foo");
-                match foo {
-                    Foo::This(idx) => resume!(idx * 2),
-                    Foo::That(idx) => resume!(idx - 1),
-                }
+                resume!(idx + 1)
             },
-            B @ Bar[_eff] => {
+            Bar => {
                 println!("bar");
                 resume!("Hello, World!".into())
             },
-            C @ effects::Baz[_eff] => {
+            effects::Baz => {
                 println!("baz");
-                'x'
+                exit!('x')
             }
         },
     );
 
-    assert_eq!(result, 'o');
+    assert_eq!(result, 'W');
 }

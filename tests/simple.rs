@@ -1,7 +1,8 @@
-#![feature(generators)]
+#![feature(generators, generator_trait, try_from)]
 
 use eff::*;
 
+#[derive(Debug)]
 struct Eff;
 impl Effect for Eff {
     type Output = String;
@@ -9,15 +10,18 @@ impl Effect for Eff {
 
 #[test]
 fn test_simple() {
-    run(
-        eff! {
-            perform!(Eff)
-        },
+    #[eff(Eff)]
+    fn f() -> String {
+        perform!(Eff)
+    }
+
+    assert_eq!(run(
+        f(),
         |x| x,
         handler! {
-            A @ Eff[_] => {
+            Eff => {
                 resume!("Hello".into())
             }
         },
-    );
+    ), "Hello");
 }

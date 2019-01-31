@@ -1,22 +1,25 @@
 #![feature(generators, generator_trait, try_from)]
 
 #[derive(Debug)]
-pub(crate) struct Eff();
+pub(crate) struct Eff;
 
 impl eff::Effect for Eff {
     type Output = ();
 }
 
-#[derive(Debug)]
-struct Hoge();
+mod hoge {
+    #[derive(Debug)]
+    pub struct Hoge;
 
-impl eff::Effect for Hoge {
-    type Output = ();
+    impl eff::Effect for Hoge {
+        type Output = ();
+    }
 }
 
-#[eff_attr::eff(Eff, Hoge)]
+#[eff_attr::eff(Eff, hoge::Hoge)]
 fn foo() {
-    eff::perform!(Eff());
+    eff::perform!(Eff);
+    eff::perform!(hoge::Hoge);
 }
 
 #[test]
@@ -24,9 +27,12 @@ fn test_attr() {
     eff::run(
         foo(),
         |x| x,
-        eff::nonexhaustive_handler! {
-            Eff() => {
-                eff::new_resume!(())
+        eff::handler! {
+            Eff => {
+                eff::resume!(())
+            },
+            hoge::Hoge => {
+                eff::resume!(())
             }
         },
     );
