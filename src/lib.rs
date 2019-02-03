@@ -4,8 +4,10 @@
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::ops::{Generator, GeneratorState};
+use std::pin::Pin;
 use std::rc::Rc;
 
+use pin_utils::unsafe_pinned;
 use rich_phantoms::PhantomCovariantAlwaysSendSync;
 
 pub use eff_attr::eff;
@@ -47,14 +49,14 @@ pub use eff_attr::handler;
 #[macro_export]
 macro_rules! resume {
     (@$eff_type:ty, $e:expr) => {{
-        return eff::HandlerResult::Resume(eff::Channel::<$eff_type>::from($e))
+        return eff::HandlerResult::Resume(eff::Channel::<$eff_type>::from($e));
     }};
 }
 
 #[macro_export]
 macro_rules! exit {
     ($e:expr) => {{
-        return eff::HandlerResult::Exit($e)
+        return eff::HandlerResult::Exit($e);
     }};
 }
 
@@ -73,6 +75,8 @@ pub struct WithEffectInner<PE, PC, G> {
 }
 
 impl<PE, PC, G> WithEffectInner<PE, PC, G> {
+    unsafe_pinned!(inner: G);
+
     pub fn new(inner: G) -> Self {
         WithEffectInner {
             inner,
@@ -164,7 +168,7 @@ impl<C> Default for Store<C> {
 }
 
 pub fn run_inner<G, E, U, C, R>(
-    mut expr: WithEffectInner<E, C, G>,
+    mut expr: Pin<&mut WithEffectInner<E, C, G>>,
     store: ComposeStore<U>,
     handler: &Fn(E) -> HandlerResult<R, C>,
 ) -> Option<R>
@@ -172,7 +176,7 @@ where
     G: Generator<Yield = Suspension<E, C, R>, Return = U>,
 {
     loop {
-        let state = unsafe { expr.inner.resume() };
+        let state = expr.as_mut().inner().resume();
         match state {
             GeneratorState::Yielded(Suspension::Perform(store, effect)) => match handler(effect) {
                 HandlerResult::Resume(c) => store.set(c),
@@ -191,7 +195,7 @@ where
 }
 
 pub fn run<G, E, T, C, H, VH, R>(
-    mut expr: WithEffectInner<E, C, G>,
+    mut expr: Pin<&mut WithEffectInner<E, C, G>>,
     value_handler: VH,
     mut handler: H,
 ) -> R
@@ -204,7 +208,7 @@ where
         // this resume is safe since the generator is pinned in a heap
         // FIXME: the above line is not the case since G might be &mut Generator.
         // Wait until pinning API arrives
-        let state = unsafe { expr.inner.resume() };
+        let state = expr.as_mut().inner().resume();
         match state {
             GeneratorState::Yielded(Suspension::Perform(store, effect)) => match handler(effect) {
                 HandlerResult::Resume(c) => store.set(c),

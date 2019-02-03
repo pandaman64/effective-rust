@@ -15,13 +15,19 @@ fn test_simple() {
         perform!(Eff)
     }
 
-    assert_eq!(run(
-        f(),
-        |x| x,
-        handler! {
-            Eff => {
-                resume!("Hello".into())
-            }
-        },
-    ), "Hello");
+    let e = f();
+    pin_utils::pin_mut!(e);
+
+    assert_eq!(
+        run(
+            e,
+            |x| x,
+            handler! {
+                Eff => {
+                    resume!("Hello".into())
+                }
+            },
+        ),
+        "Hello"
+    );
 }

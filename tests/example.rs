@@ -35,8 +35,11 @@ fn test_example() {
         s.chars().nth(i1 + i2).unwrap()
     }
 
+    let e = expr_with_effect();
+    pin_utils::pin_mut!(e);
+
     let result = run(
-        expr_with_effect(),
+        e,
         |x| x,
         handler! {
             -> char,

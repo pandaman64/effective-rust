@@ -24,8 +24,10 @@ fn foo() {
 
 #[test]
 fn test_attr() {
+    let e = foo();
+    pin_utils::pin_mut!(e);
     eff::run(
-        foo(),
+        e,
         |x| x,
         eff::handler! {
             Eff => {

@@ -137,14 +137,14 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
                 -> eff::WithEffectInner<
                     #effects_type_name,
                     #channel_type_name,
-                    Box<std::ops::Generator<Yield = eff::Suspension<E, C, R>, Return = ()>>,
+                    std::pin::Pin<std::boxed::Box<std::ops::Generator<Yield = eff::Suspension<E, C, R>, Return = ()>>>,
                 >
             },
             syn::ReturnType::Type(arrow, ty) => quote! {
                 #arrow eff::WithEffectInner<
                     #effects_type_name,
                     #channel_type_name,
-                    Box<std::ops::Generator<Yield = eff::Suspension<E, C, R>, Return = #ty>>,
+                    std::pin::Pin<std::boxed::Box<std::ops::Generator<Yield = eff::Suspension<E, C, R>, Return = #ty>>>,
                 >
             },
         })
@@ -154,7 +154,7 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         func.block = syn::parse2(quote! {
             {
                 eff::WithEffectInner::<#effects_type_name, #channel_type_name, _>::new(
-                    Box::new(#[allow(unreachable_code)] static move || {
+                    std::boxed::Box::pin(#[allow(unreachable_code)] static move || {
                         if false {
                             yield unreachable!();
                         }

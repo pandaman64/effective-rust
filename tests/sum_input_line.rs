@@ -23,8 +23,11 @@ fn sum_up(s: String) -> usize {
         sum
     }
 
+    let e = read(s);
+    pin_utils::pin_mut!(e);
+
     run(
-        read(s),
+        e,
         |x| x,
         handler! {
             ConversionError(err) => {
