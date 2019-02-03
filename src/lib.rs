@@ -6,6 +6,8 @@ use std::marker::PhantomData;
 use std::ops::{Generator, GeneratorState};
 use std::rc::Rc;
 
+use rich_phantoms::PhantomCovariantAlwaysSendSync;
+
 pub use eff_attr::eff;
 
 #[macro_export]
@@ -58,7 +60,7 @@ macro_rules! exit {
 
 pub enum Suspension<E, C, R> {
     Perform(Store<C>, E),
-    Compose(Box<FnOnce(&mut FnMut(E) -> HandlerResult<R, C>) -> Option<R>>),
+    Compose(Box<FnOnce(&Fn(E) -> HandlerResult<R, C>) -> Option<R>>),
 }
 
 pub trait Effect {
@@ -67,7 +69,7 @@ pub trait Effect {
 
 pub struct WithEffectInner<PE, PC, G> {
     pub inner: G,
-    phantom: PhantomData<fn() -> (PE, PC)>,
+    phantom: PhantomCovariantAlwaysSendSync<fn() -> (PE, PC)>,
 }
 
 impl<PE, PC, G> WithEffectInner<PE, PC, G> {
@@ -164,7 +166,7 @@ impl<C> Default for Store<C> {
 pub fn run_inner<G, E, U, C, R>(
     mut expr: WithEffectInner<E, C, G>,
     store: ComposeStore<U>,
-    handler: &mut FnMut(E) -> HandlerResult<R, C>,
+    handler: &Fn(E) -> HandlerResult<R, C>,
 ) -> Option<R>
 where
     G: Generator<Yield = Suspension<E, C, R>, Return = U>,
@@ -195,7 +197,7 @@ pub fn run<G, E, T, C, H, VH, R>(
 ) -> R
 where
     G: Generator<Yield = Suspension<E, C, R>, Return = T>,
-    H: FnMut(E) -> HandlerResult<R, C> + 'static,
+    H: Fn(E) -> HandlerResult<R, C> + 'static,
     VH: FnOnce(T) -> R,
 {
     loop {
