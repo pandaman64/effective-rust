@@ -187,7 +187,7 @@ where
                 return f(handler);
             }
             GeneratorState::Complete(v) => {
-                store.set(v.into());
+                store.set(v);
                 return None;
             }
         }
