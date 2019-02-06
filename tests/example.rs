@@ -36,27 +36,20 @@ fn test_example() {
     }
 
     let e = expr_with_effect();
-    pin_utils::pin_mut!(e);
-
-    let result = run(
-        e,
-        |x| x,
-        handler! {
-            -> char,
-            Foo(idx) => {
-                println!("foo");
-                resume!(idx + 1)
-            },
-            Bar => {
-                println!("bar");
-                resume!("Hello, World!".into())
-            },
-            effects::Baz => {
-                println!("baz");
-                exit!('x')
-            }
-        },
-    );
+    let result = e
+        .handle(|Foo(x)| {
+            println!("foo");
+            HandlerResult::Resume(x + 1)
+        })
+        .handle(|Bar| {
+            println!("bar");
+            HandlerResult::Resume("Hello, World!".into())
+        })
+        .handle(|effects::Baz| {
+            println!("baz");
+            HandlerResult::Exit('x')
+        })
+        .run(|x| x);
 
     assert_eq!(result, 'W');
 }

@@ -1,6 +1,6 @@
 //! 1.1. Recovering from errors
 
-#![feature(generators, generator_trait, try_from)]
+#![feature(generators, generator_trait, try_from, never_type)]
 
 use eff::*;
 
@@ -24,18 +24,11 @@ fn sum_up(s: String) -> usize {
     }
 
     let e = read(s);
-    pin_utils::pin_mut!(e);
-
-    run(
-        e,
-        |x| x,
-        handler! {
-            ConversionError(err) => {
-                println!("conversion error: {}", err);
-                resume!(0)
-            }
-        },
-    )
+    e.handle(|x| {
+        println!("conversion error: {:?}", x);
+        HandlerResult::Resume(0)
+    })
+    .run(|x| x)
 }
 
 #[test]

@@ -11,7 +11,6 @@ readme = "README.md"
 
 [dependencies]
 eff-attr = { path = "./eff-attr" }
-coproduct = { path = "./coproduct" }
 proc-macro-hack = "0.5.4"
 rich-phantoms = "0.1.0"
 pin-utils = "0.1.0-alpha.4"

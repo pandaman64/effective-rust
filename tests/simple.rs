@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait, try_from)]
+#![feature(generators, generator_trait, try_from, never_type)]
 
 use eff::*;
 
@@ -16,18 +16,9 @@ fn test_simple() {
     }
 
     let e = f();
-    pin_utils::pin_mut!(e);
-
     assert_eq!(
-        run(
-            e,
-            |x| x,
-            handler! {
-                Eff => {
-                    resume!("Hello".into())
-                }
-            },
-        ),
+        e.handle(|Eff| HandlerResult::Resume("Hello".into()))
+            .run(|x| x),
         "Hello"
     );
 }

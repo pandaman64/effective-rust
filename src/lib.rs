@@ -1,232 +1,198 @@
-#![feature(nll, generators, generator_trait, unsized_locals)]
+#![feature(nll, generators, generator_trait, unsized_locals, never_type)]
 #![feature(trace_macros)]
 
-use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
-use std::rc::Rc;
 
 use pin_utils::unsafe_pinned;
 use rich_phantoms::PhantomCovariantAlwaysSendSync;
 
 pub use eff_attr::eff;
+pub use pin_utils::pin_mut;
+
+pub mod coproduct;
+
+#[macro_export]
+macro_rules! Coproduct {
+    () => {
+        !
+    };
+    ($head:ty $(,$tail:ty)* $(,)?) => {
+        $crate::coproduct::Either<$head, $crate::Coproduct![$($tail),*]>
+    };
+}
 
 #[macro_export]
 macro_rules! perform {
     ($eff:expr) => {{
-        #[inline(always)]
-        fn __getter<'e, 'c, E: $crate::Effect, C: $crate::Channel<E> + 'c>(
-            _: &'e E,
-            store: $crate::Store<C>,
-        ) -> impl FnOnce() -> <E as $crate::Effect>::Output + 'c {
-            move || store.get::<E>()
-        }
-        let store = $crate::Store::new();
-        let eff = $eff;
-        let getter = __getter(&eff, store.clone());
-        yield $crate::Suspension::Perform(store.clone(), Into::into(eff));
-        getter()
+        use $crate::coproduct::Inject;
+        let store = $crate::coproduct::Store::default();
+        yield Inject::inject($eff, store.clone());
+        store.get()
     }};
 }
 
 #[macro_export]
-macro_rules! compose {
+macro_rules! invoke {
     ($eff:expr) => {{
-        let store = $crate::ComposeStore::new();
-        let store2 = store.clone();
-        let eff = $eff;
-        yield $crate::Suspension::Compose(Box::new(move |handler| {
-            $crate::run_inner(eff, store, handler)
-        }));
-        store2.take()
+        match $eff {
+            eff => {
+                $crate::pin_mut!(eff);
+                loop {
+                    match $crate::WithEffect::resume(eff.as_mut(), |x| x) {
+                        Resolve::Done(x) => break x,
+                        Resolve::Handled(x) => break x,
+                        Resolve::NotHandled(e) => yield e.embed(),
+                        Resolve::Continue => {}
+                    }
+                }
+            }
+        }
     }};
-}
-
-#[proc_macro_hack::proc_macro_hack]
-pub use eff_attr::handler;
-
-#[macro_export]
-macro_rules! resume {
-    (@$eff_type:ty, $e:expr) => {{
-        return eff::HandlerResult::Resume(eff::Channel::<$eff_type>::from($e));
-    }};
-}
-
-#[macro_export]
-macro_rules! exit {
-    ($e:expr) => {{
-        return eff::HandlerResult::Exit($e);
-    }};
-}
-
-pub enum Suspension<E, C, R> {
-    Perform(Store<C>, E),
-    Compose(Box<FnOnce(&Fn(E) -> HandlerResult<R, C>) -> Option<R>>),
 }
 
 pub trait Effect {
     type Output;
 }
 
-pub struct WithEffectInner<PE, PC, G> {
-    pub inner: G,
-    phantom: PhantomCovariantAlwaysSendSync<fn() -> (PE, PC)>,
+pub enum Resolve<T, R, E> {
+    Continue,
+    Done(T),
+    Handled(R),
+    NotHandled(E),
 }
 
-impl<PE, PC, G> WithEffectInner<PE, PC, G> {
-    unsafe_pinned!(inner: G);
-
-    pub fn new(inner: G) -> Self {
-        WithEffectInner {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-}
-
-pub trait Channel<E>
+pub enum HandlerResult<E, R>
 where
     E: Effect,
 {
-    fn from(v: E::Output) -> Self;
-    fn into(self) -> E::Output;
+    Exit(R),
+    Resume(E::Output),
 }
 
-pub struct ComposeStore<U> {
-    pub inner: Rc<RefCell<Option<U>>>,
-}
+pub trait WithEffect<T, R>
+where
+    Self: Sized,
+{
+    type Effects;
 
-impl<U> Clone for ComposeStore<U> {
-    fn clone(&self) -> Self {
-        ComposeStore {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<U> Default for ComposeStore<U> {
-    fn default() -> Self {
-        ComposeStore {
-            inner: Default::default(),
-        }
-    }
-}
-
-impl<U> ComposeStore<U> {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn set(&self, v: U) {
-        *self.inner.borrow_mut() = Some(v);
-    }
-
-    pub fn take(&self) -> U {
-        self.inner.borrow_mut().take().unwrap()
-    }
-}
-
-#[derive(Debug)]
-pub struct Store<C> {
-    pub inner: Rc<RefCell<Option<C>>>,
-}
-
-impl<C> Store<C> {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn set(&self, v: C) {
-        *self.inner.borrow_mut() = Some(v);
-    }
-
-    pub fn get<E>(&self) -> E::Output
+    fn handle<E, Index>(self, handler: fn(E) -> HandlerResult<E, R>) -> Handled<Self, R, E, Index>
     where
         E: Effect,
-        C: Channel<E>,
+        Self::Effects: coproduct::Uninject<E, Index>,
     {
-        let value = self.inner.borrow_mut().take().unwrap();
-        value.into()
-    }
-}
-
-impl<C> Clone for Store<C> {
-    fn clone(&self) -> Self {
-        Store {
-            inner: self.inner.clone(),
+        Handled {
+            inner: self,
+            handler,
+            phantom: PhantomData,
         }
     }
-}
 
-impl<C> Default for Store<C> {
-    fn default() -> Self {
-        Store {
-            inner: Rc::new(RefCell::new(None)),
-        }
-    }
-}
-
-pub fn run_inner<G, E, U, C, R>(
-    mut expr: Pin<&mut WithEffectInner<E, C, G>>,
-    store: ComposeStore<U>,
-    handler: &Fn(E) -> HandlerResult<R, C>,
-) -> Option<R>
-where
-    G: Generator<Yield = Suspension<E, C, R>, Return = U>,
-{
-    loop {
-        let state = expr.as_mut().inner().resume();
-        match state {
-            GeneratorState::Yielded(Suspension::Perform(store, effect)) => match handler(effect) {
-                HandlerResult::Resume(c) => store.set(c),
-                HandlerResult::Exit(v) => return Some(v),
-                HandlerResult::Unhandled => panic!("effect unhandled"),
-            },
-            GeneratorState::Yielded(Suspension::Compose(f)) => {
-                return f(handler);
-            }
-            GeneratorState::Complete(v) => {
-                store.set(v);
-                return None;
+    fn run<VH>(self, value_handler: VH) -> R
+    where
+        VH: FnOnce(T) -> R,
+    {
+        let this = self;
+        pin_mut!(this);
+        loop {
+            match Self::resume(this.as_mut(), |x| x) {
+                Resolve::Done(v) => return value_handler(v),
+                Resolve::Handled(x) => return x,
+                Resolve::NotHandled(_) => panic!("unhandled effect"),
+                Resolve::Continue => {}
             }
         }
     }
+
+    fn resume<Derived, A>(derived: Pin<&mut Derived>, accessor: A) -> Resolve<T, R, Self::Effects>
+    where
+        Derived: WithEffect<T, R>,
+        A: Fn(Pin<&mut Derived>) -> Pin<&mut Self>;
 }
 
-pub fn run<G, E, T, C, H, VH, R>(
-    mut expr: Pin<&mut WithEffectInner<E, C, G>>,
-    value_handler: VH,
-    mut handler: H,
-) -> R
+pub struct Unhandled<G> {
+    inner: G,
+}
+
+impl<G> Unhandled<G> {
+    pub fn new(inner: G) -> Self {
+        Unhandled { inner }
+    }
+}
+
+impl<G> Unhandled<G> {
+    unsafe_pinned!(inner: G);
+}
+
+impl<T, R, Effects, G> WithEffect<T, R> for Unhandled<G>
 where
-    G: Generator<Yield = Suspension<E, C, R>, Return = T>,
-    H: Fn(E) -> HandlerResult<R, C> + 'static,
-    VH: FnOnce(T) -> R,
+    Self: Sized,
+    G: Generator<Yield = Effects, Return = T>,
 {
-    loop {
-        // this resume is safe since the generator is pinned in a heap
-        // FIXME: the above line is not the case since G might be &mut Generator.
-        // Wait until pinning API arrives
-        let state = expr.as_mut().inner().resume();
-        match state {
-            GeneratorState::Yielded(Suspension::Perform(store, effect)) => match handler(effect) {
-                HandlerResult::Resume(c) => store.set(c),
-                HandlerResult::Exit(v) => return v,
-                HandlerResult::Unhandled => panic!("effect unhandled"),
-            },
-            GeneratorState::Yielded(Suspension::Compose(f)) => {
-                if let Some(v) = f(&mut handler) {
-                    return v;
+    type Effects = Effects;
+
+    fn resume<Derived, A>(derived: Pin<&mut Derived>, accessor: A) -> Resolve<T, R, Self::Effects>
+    where
+        Derived: WithEffect<T, R>,
+        A: Fn(Pin<&mut Derived>) -> Pin<&mut Self>,
+    {
+        match accessor(derived).inner().resume() {
+            GeneratorState::Yielded(e) => Resolve::NotHandled(e),
+            GeneratorState::Complete(v) => Resolve::Done(v),
+        }
+    }
+}
+
+pub struct Handled<WE, R, E, I>
+where
+    E: Effect,
+{
+    inner: WE,
+    handler: fn(E) -> HandlerResult<E, R>,
+    phantom: PhantomCovariantAlwaysSendSync<I>,
+}
+
+impl<WE, R, E, I> Handled<WE, R, E, I>
+where
+    E: Effect,
+{
+    unsafe_pinned!(inner: WE);
+}
+
+impl<T, R: 'static, WE, E: 'static, I: 'static> WithEffect<T, R> for Handled<WE, R, E, I>
+where
+    E: Effect,
+    WE: WithEffect<T, R>,
+    <WE as WithEffect<T, R>>::Effects: coproduct::Uninject<E, I>,
+{
+    type Effects = <WE::Effects as coproduct::Uninject<E, I>>::Remainder;
+
+    fn resume<Derived, A>(
+        mut derived: Pin<&mut Derived>,
+        accessor: A,
+    ) -> Resolve<T, R, Self::Effects>
+    where
+        Derived: WithEffect<T, R>,
+        A: Fn(Pin<&mut Derived>) -> Pin<&mut Self>,
+    {
+        match WE::resume(derived.as_mut(), |derived| accessor(derived).inner()) {
+            Resolve::Done(v) => Resolve::Done(v),
+            Resolve::Continue => Resolve::Continue,
+            Resolve::Handled(v) => Resolve::Handled(v),
+            Resolve::NotHandled(e) => match coproduct::Uninject::<E, I>::uninject(e) {
+                Ok((effect, store)) => {
+                    let handler = accessor(derived.as_mut()).handler;
+                    match handler(effect) {
+                        HandlerResult::Exit(v) => Resolve::Handled(v),
+                        HandlerResult::Resume(output) => {
+                            store.set(output);
+                            Resolve::Continue
+                        }
+                    }
                 }
-            }
-            GeneratorState::Complete(v) => return value_handler(v),
+                Err(rem) => Resolve::NotHandled(rem),
+            },
         }
     }
-}
-
-pub enum HandlerResult<R, C> {
-    Resume(C),
-    Exit(R),
-    Unhandled,
 }

@@ -1,7 +1,7 @@
-#![feature(generators, generator_trait, try_from)]
+#![feature(generators, generator_trait, try_from, never_type)]
 
 #[derive(Debug)]
-pub(crate) struct Eff;
+struct Eff;
 
 impl eff::Effect for Eff {
     type Output = ();
@@ -24,18 +24,19 @@ fn foo() {
 
 #[test]
 fn test_attr() {
+    use eff::{HandlerResult, WithEffect};
+
     let e = foo();
-    pin_utils::pin_mut!(e);
-    eff::run(
-        e,
-        |x| x,
-        eff::handler! {
-            Eff => {
-                eff::resume!(())
-            },
-            hoge::Hoge => {
-                eff::resume!(())
-            }
-        },
-    );
+    let e = e
+        .handle(|_: Eff| {
+            println!("eff");
+            HandlerResult::Resume(())
+        })
+        .handle(|_: hoge::Hoge| {
+            println!("hoge");
+            HandlerResult::Exit(())
+        });
+    e.run(|()| {
+        println!("done");
+    });
 }
