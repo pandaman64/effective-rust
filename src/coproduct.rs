@@ -75,6 +75,7 @@ impl<E, Rest> Inject<E, Zero> for Either<E, Rest>
 where
     E: Effect,
 {
+    #[inline]
     fn inject(effect: E, store: Store<E>) -> Self {
         Either::A(effect, store)
     }
@@ -86,6 +87,7 @@ where
     F: Effect,
     Rest: Inject<E, Index>,
 {
+    #[inline]
     fn inject(effect: E, store: Store<E>) -> Self {
         Either::B(Rest::inject(effect, store))
     }
@@ -106,6 +108,7 @@ where
 {
     type Remainder = Rest;
 
+    #[inline]
     fn uninject(self) -> Result<(E, Store<E>), Self::Remainder> {
         match self {
             Either::A(effect, store) => Ok((effect, store)),
@@ -122,6 +125,7 @@ where
 {
     type Remainder = Either<F, <Rest as Uninject<E, Index>>::Remainder>;
 
+    #[inline]
     fn uninject(self) -> Result<(E, Store<E>), Self::Remainder> {
         match self {
             Either::A(effect, store) => Err(Either::A(effect, store)),
@@ -135,6 +139,7 @@ pub trait Embed<Target, Indices> {
 }
 
 impl<Target> Embed<Target, !> for ! {
+    #[inline]
     fn embed(self) -> Target {
         unreachable!()
     }
@@ -147,6 +152,7 @@ where
     Target: Inject<E, HeadIndex>,
     Rest: Embed<Target, TailIndices>,
 {
+    #[inline]
     fn embed(self) -> Target {
         match self {
             Either::A(effect, store) => Target::inject(effect, store),
@@ -159,6 +165,7 @@ impl<F, Rest> Either<F, Rest>
 where
     F: Effect,
 {
+    #[inline]
     pub fn inject<E, Index>(effect: E, store: Store<E>) -> Self
     where
         E: Effect,
@@ -167,6 +174,7 @@ where
         Inject::inject(effect, store)
     }
 
+    #[inline]
     pub fn uninject<E, Index>(
         self,
     ) -> Result<(E, Store<E>), <Self as Uninject<E, Index>>::Remainder>
@@ -177,6 +185,7 @@ where
         Uninject::uninject(self)
     }
 
+    #[inline]
     pub fn embed<Target, Indices>(self) -> Target
     where
         Self: Embed<Target, Indices>,

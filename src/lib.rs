@@ -77,6 +77,7 @@ where
 {
     type Effects;
 
+    #[inline]
     fn handle<E, Index>(self, handler: fn(E) -> HandlerResult<E, R>) -> Handled<Self, R, E, Index>
     where
         E: Effect,
@@ -89,6 +90,7 @@ where
         }
     }
 
+    #[inline]
     fn run<VH>(self, value_handler: VH) -> R
     where
         VH: FnOnce(T) -> R,
@@ -132,6 +134,7 @@ where
 {
     type Effects = Effects;
 
+    #[inline]
     fn resume<Derived, A>(derived: Pin<&mut Derived>, accessor: A) -> Resolve<T, R, Self::Effects>
     where
         Derived: WithEffect<T, R>,
@@ -168,6 +171,7 @@ where
 {
     type Effects = <WE::Effects as coproduct::Uninject<E, I>>::Remainder;
 
+    #[inline]
     fn resume<Derived, A>(
         mut derived: Pin<&mut Derived>,
         accessor: A,
