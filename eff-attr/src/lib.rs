@@ -1,5 +1,4 @@
 extern crate proc_macro;
-extern crate proc_macro2;
 
 #[macro_use]
 extern crate syn;
@@ -13,10 +12,8 @@ type TokenStream2 = proc_macro2::TokenStream;
 
 #[proc_macro_attribute]
 pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
-    use proc_macro2::Span;
     use syn::parse::Parser;
     use syn::punctuated::Punctuated;
-    use syn::Ident;
 
     // TODO: parse #[eff(parameter = T)]
     let effects_parser = Punctuated::<syn::Type, Token![,]>::parse_terminated;
