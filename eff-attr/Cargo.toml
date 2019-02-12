@@ -4,6 +4,10 @@ version = "0.0.2"
 authors = ["pandaman64 <kointosudesuyo@infoseek.jp>"]
 edition = "2018"
 
+description = "Attribute macro for eff"
+repository = "https://github.com/pandaman64/effective-rust/"
+license = "MIT OR Apache-2.0"
+
 [lib]
 proc-macro = true
 
