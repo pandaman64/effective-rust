@@ -1,6 +1,6 @@
 [package]
 name = "eff-attr"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["pandaman64 <kointosudesuyo@infoseek.jp>"]
 edition = "2018"
 
@@ -9,6 +9,6 @@ proc-macro = true
 
 [dependencies]
 proc-macro2 = "0.4"
-proc-macro-hack = "0.5.4"
-syn = { version = "0.15.23", features = ["extra-traits", "full", "visit-mut"] }
-quote = "0.6.10"
+proc-macro-hack = "0.5"
+syn = { version = "0.15", features = ["full"] }
+quote = "0.6"
