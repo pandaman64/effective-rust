@@ -47,7 +47,7 @@ macro_rules! invoke {
             eff => {
                 $crate::pin_mut!(eff);
                 loop {
-                    match $crate::WithEffect::resume(eff.as_mut(), |x| x) {
+                    match eff.as_mut().resume() {
                         Resolve::Done(x) => break x,
                         Resolve::Handled(x) => break x,
                         Resolve::NotHandled(e) => yield e.embed(),
@@ -105,7 +105,7 @@ where
         let this = self;
         pin_mut!(this);
         loop {
-            match Self::resume(this.as_mut(), |x| x) {
+            match this.as_mut().resume() {
                 Resolve::Done(v) => return Ok(value_handler(v)),
                 Resolve::Handled(x) => return Ok(x),
                 Resolve::NotHandled(e) => return Err(e),
@@ -114,10 +114,7 @@ where
         }
     }
 
-    fn resume<Derived, A>(derived: Pin<&mut Derived>, accessor: A) -> Resolve<T, R, Self::Effects>
-    where
-        Derived: WithEffect<T, R>,
-        A: Fn(Pin<&mut Derived>) -> Pin<&mut Self>;
+    fn resume(self: Pin<&mut Self>) -> Resolve<T, R, Self::Effects>;
 }
 
 pub struct Unhandled<G> {
@@ -142,12 +139,8 @@ where
     type Effects = Effects;
 
     #[inline]
-    fn resume<Derived, A>(derived: Pin<&mut Derived>, accessor: A) -> Resolve<T, R, Self::Effects>
-    where
-        Derived: WithEffect<T, R>,
-        A: Fn(Pin<&mut Derived>) -> Pin<&mut Self>,
-    {
-        match accessor(derived).inner().resume() {
+    fn resume(self: Pin<&mut Self>) -> Resolve<T, R, Self::Effects> {
+        match self.inner().resume() {
             GeneratorState::Yielded(e) => Resolve::NotHandled(e),
             GeneratorState::Complete(v) => Resolve::Done(v),
         }
@@ -170,7 +163,7 @@ where
     unsafe_pinned!(inner: WE);
 }
 
-impl<T, R: 'static, WE, E: 'static, I: 'static> WithEffect<T, R> for Handled<WE, R, E, I>
+impl<T, R, WE, E, I> WithEffect<T, R> for Handled<WE, R, E, I>
 where
     E: Effect,
     WE: WithEffect<T, R>,
@@ -179,21 +172,14 @@ where
     type Effects = <WE::Effects as coproduct::Uninject<E, I>>::Remainder;
 
     #[inline]
-    fn resume<Derived, A>(
-        mut derived: Pin<&mut Derived>,
-        accessor: A,
-    ) -> Resolve<T, R, Self::Effects>
-    where
-        Derived: WithEffect<T, R>,
-        A: Fn(Pin<&mut Derived>) -> Pin<&mut Self>,
-    {
-        match WE::resume(derived.as_mut(), |derived| accessor(derived).inner()) {
+    fn resume(mut self: Pin<&mut Self>) -> Resolve<T, R, Self::Effects> {
+        match self.as_mut().inner().resume() {
             Resolve::Done(v) => Resolve::Done(v),
             Resolve::Continue => Resolve::Continue,
             Resolve::Handled(v) => Resolve::Handled(v),
             Resolve::NotHandled(e) => match coproduct::Uninject::<E, I>::uninject(e) {
                 Ok((effect, store)) => {
-                    let handler = accessor(derived.as_mut()).handler;
+                    let handler = self.handler;
                     match handler(effect) {
                         HandlerResult::Exit(v) => Resolve::Handled(v),
                         HandlerResult::Resume(output) => {
