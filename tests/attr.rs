@@ -38,5 +38,6 @@ fn test_attr() {
         });
     e.run(|()| {
         println!("done");
-    }).unwrap();
+    })
+    .unwrap();
 }

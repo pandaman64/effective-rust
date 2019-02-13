@@ -15,5 +15,8 @@ fn foo() {
 #[test]
 fn test_not_handled() {
     use eff::WithEffect;
-    assert_eq!(foo().run(|x| x).unwrap_err().uninject().unwrap(), (Eff, Default::default()));
+    assert_eq!(
+        foo().run(|x| x).unwrap_err().uninject().unwrap(),
+        (Eff, Default::default())
+    );
 }
