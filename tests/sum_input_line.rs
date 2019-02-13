@@ -29,6 +29,7 @@ fn sum_up(s: String) -> usize {
         HandlerResult::Resume(0)
     })
     .run(|x| x)
+    .unwrap()
 }
 
 #[test]

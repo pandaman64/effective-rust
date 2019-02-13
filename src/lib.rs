@@ -19,7 +19,6 @@ pub use eff_attr::eff;
 pub use pin_utils::pin_mut;
 
 pub mod coproduct;
-mod debug;
 
 #[macro_export]
 macro_rules! Coproduct {
@@ -99,7 +98,7 @@ where
     }
 
     #[inline]
-    fn run<VH>(self, value_handler: VH) -> R
+    fn run<VH>(self, value_handler: VH) -> Result<R, Self::Effects>
     where
         VH: FnOnce(T) -> R,
     {
@@ -107,9 +106,9 @@ where
         pin_mut!(this);
         loop {
             match Self::resume(this.as_mut(), |x| x) {
-                Resolve::Done(v) => return value_handler(v),
-                Resolve::Handled(x) => return x,
-                Resolve::NotHandled(e) => panic!("unhandled effect: {:?}", debug::Debug(e)),
+                Resolve::Done(v) => return Ok(value_handler(v)),
+                Resolve::Handled(x) => return Ok(x),
+                Resolve::NotHandled(e) => return Err(e),
                 Resolve::Continue => {}
             }
         }

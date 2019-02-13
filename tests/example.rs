@@ -49,7 +49,8 @@ fn test_example() {
             println!("baz");
             HandlerResult::Exit('x')
         })
-        .run(|x| x);
+        .run(|x| x)
+        .unwrap();
 
     assert_eq!(result, 'W');
 }

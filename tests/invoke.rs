@@ -40,7 +40,8 @@ fn test_invoke() {
             println!("Bar({})", x);
             HandlerResult::Resume(x * 2)
         })
-        .run(|x| x),
+        .run(|x| x)
+        .unwrap(),
         44
     );
 }

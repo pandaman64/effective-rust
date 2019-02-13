@@ -2,6 +2,7 @@ use super::Effect;
 use rich_phantoms::PhantomCovariantAlwaysSendSync;
 
 use std::cell::RefCell;
+use std::fmt;
 use std::rc::Rc;
 
 pub enum Zero {}
@@ -14,6 +15,7 @@ impl<T> Effect for Wrap<T> {
     type Output = !;
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Store<E>
 where
     E: Effect,
@@ -62,6 +64,58 @@ where
 {
     A(E, Store<E>),
     B(Rest),
+}
+
+impl<E, Rest> Clone for Either<E, Rest>
+where
+    E: Effect + Clone,
+    Rest: Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Either::A(effect, store) => Either::A(effect.clone(), store.clone()),
+            Either::B(rest) => Either::B(rest.clone()),
+        }
+    }
+}
+
+impl<E, Rest> fmt::Debug for Either<E, Rest>
+where
+    E: Effect + fmt::Debug,
+    E::Output: fmt::Debug,
+    Rest: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Either::A(effect, store) => write!(f, "({:?}, {:?})", effect, store),
+            Either::B(rest) => write!(f, "{:?}", rest),
+        }
+    }
+}
+
+impl<E, Rest> PartialEq for Either<E, Rest>
+where
+    E: Effect + PartialEq,
+    E::Output: PartialEq,
+    Rest: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        use self::Either::*;
+
+        match (self, other) {
+            (A(x, xstore), A(y, ystore)) => x == y && xstore == ystore,
+            (B(x), B(y)) => x == y,
+            _ => false,
+        }
+    }
+}
+
+impl<E, Rest> Eq for Either<E, Rest>
+where
+    E: Effect + Eq,
+    E::Output: Eq,
+    Rest: Eq,
+{
 }
 
 pub trait Inject<E, Index>

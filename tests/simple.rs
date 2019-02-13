@@ -18,7 +18,8 @@ fn test_simple() {
     let e = f();
     assert_eq!(
         e.handle(|Eff| HandlerResult::Resume("Hello".into()))
-            .run(|x| x),
+            .run(|x| x)
+            .unwrap(),
         "Hello"
     );
 }
