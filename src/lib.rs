@@ -17,6 +17,7 @@ use rich_phantoms::PhantomCovariantAlwaysSendSync;
 
 pub use eff_attr::eff;
 pub use pin_utils::pin_mut;
+pub use std::pin as pin_reexport;
 
 pub mod coproduct;
 
@@ -35,7 +36,7 @@ macro_rules! perform {
     ($eff:expr) => {{
         use $crate::coproduct::Inject;
         let store = $crate::coproduct::Store::default();
-        yield Inject::inject($eff, store.clone());
+        yield $crate::coproduct::Inject::inject($eff, store.clone());
         store.get()
     }};
 }
@@ -47,11 +48,12 @@ macro_rules! invoke {
             eff => {
                 $crate::pin_mut!(eff);
                 loop {
-                    match eff.as_mut().resume() {
-                        Resolve::Done(x) => break x,
-                        Resolve::Handled(x) => break x,
-                        Resolve::NotHandled(e) => yield e.embed(),
-                        Resolve::Continue => {}
+                    let with_effect = $crate::pin_reexport::Pin::as_mut(&mut eff);
+                    match $crate::WithEffect::resume(with_effect) {
+                        $crate::Resolve::Done(x) => break x,
+                        $crate::Resolve::Handled(x) => break x,
+                        $crate::Resolve::NotHandled(e) => yield $crate::coproduct::Embed::embed(e),
+                        $crate::Resolve::Continue => {}
                     }
                 }
             }
