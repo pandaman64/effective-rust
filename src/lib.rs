@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 
-use pin_utils::unsafe_pinned;
+use pin_utils::{unsafe_pinned, unsafe_unpinned};
 use rich_phantoms::PhantomCovariantAlwaysSendSync;
 
 pub use eff_attr::eff;
@@ -85,10 +85,11 @@ where
     type Effects;
 
     #[inline]
-    fn handle<E, Index>(self, handler: fn(E) -> HandlerResult<E, R>) -> Handled<Self, R, E, Index>
+    fn handle<E, Index, H>(self, handler: H) -> Handled<Self, H, R, E, Index>
     where
         E: Effect,
         Self::Effects: coproduct::Uninject<E, Index>,
+        H: FnMut(E) -> HandlerResult<E, R>,
     {
         Handled {
             inner: self,
@@ -147,27 +148,29 @@ where
     }
 }
 
-pub struct Handled<WE, R, E, I>
+pub struct Handled<WE, H, R, E, I>
 where
     E: Effect,
 {
     inner: WE,
-    handler: fn(E) -> HandlerResult<E, R>,
-    phantom: PhantomCovariantAlwaysSendSync<I>,
+    handler: H,
+    phantom: PhantomCovariantAlwaysSendSync<(R, E, I)>,
 }
 
-impl<WE, R, E, I> Handled<WE, R, E, I>
+impl<WE, H, R, E, I> Handled<WE, H, R, E, I>
 where
     E: Effect,
 {
     unsafe_pinned!(inner: WE);
+    unsafe_unpinned!(handler: H);
 }
 
-impl<T, R, WE, E, I> WithEffect<T, R> for Handled<WE, R, E, I>
+impl<T, R, WE, H, E, I> WithEffect<T, R> for Handled<WE, H, R, E, I>
 where
     E: Effect,
     WE: WithEffect<T, R>,
     <WE as WithEffect<T, R>>::Effects: coproduct::Uninject<E, I>,
+    H: FnMut(E) -> HandlerResult<E, R>,
 {
     type Effects = <WE::Effects as coproduct::Uninject<E, I>>::Remainder;
 
@@ -179,8 +182,7 @@ where
             Resolve::Handled(v) => Resolve::Handled(v),
             Resolve::NotHandled(e) => match coproduct::Uninject::<E, I>::uninject(e) {
                 Ok((effect, store)) => {
-                    let handler = self.handler;
-                    match handler(effect) {
+                    match self.handler()(effect) {
                         HandlerResult::Exit(v) => Resolve::Handled(v),
                         HandlerResult::Resume(output) => {
                             store.set(output);
