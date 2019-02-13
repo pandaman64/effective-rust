@@ -183,15 +183,13 @@ where
             Resolve::Continue => Resolve::Continue,
             Resolve::Handled(v) => Resolve::Handled(v),
             Resolve::NotHandled(e) => match coproduct::Uninject::<E, I>::uninject(e) {
-                Ok((effect, store)) => {
-                    match self.handler()(effect) {
-                        HandlerResult::Exit(v) => Resolve::Handled(v),
-                        HandlerResult::Resume(output) => {
-                            store.set(output);
-                            Resolve::Continue
-                        }
+                Ok((effect, store)) => match self.handler()(effect) {
+                    HandlerResult::Exit(v) => Resolve::Handled(v),
+                    HandlerResult::Resume(output) => {
+                        store.set(output);
+                        Resolve::Continue
                     }
-                }
+                },
                 Err(rem) => Resolve::NotHandled(rem),
             },
         }
