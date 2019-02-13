@@ -1,4 +1,11 @@
-#![feature(nll, generators, generator_trait, unsized_locals, never_type)]
+#![feature(
+    nll,
+    generators,
+    generator_trait,
+    never_type,
+    specialization,
+    core_intrinsics
+)]
 #![feature(trace_macros)]
 
 use std::marker::PhantomData;
@@ -12,6 +19,7 @@ pub use eff_attr::eff;
 pub use pin_utils::pin_mut;
 
 pub mod coproduct;
+mod debug;
 
 #[macro_export]
 macro_rules! Coproduct {
@@ -101,7 +109,7 @@ where
             match Self::resume(this.as_mut(), |x| x) {
                 Resolve::Done(v) => return value_handler(v),
                 Resolve::Handled(x) => return x,
-                Resolve::NotHandled(_) => panic!("unhandled effect"),
+                Resolve::NotHandled(e) => panic!("unhandled effect: {:?}", debug::Debug(e)),
                 Resolve::Continue => {}
             }
         }
