@@ -15,7 +15,7 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
     use syn::parse::Parser;
     use syn::punctuated::Punctuated;
 
-    // TODO: parse #[eff(parameter = T)]
+    // TODO: parse #[eff(lifetime = 'a)]
     let effects_parser = Punctuated::<syn::Type, Token![,]>::parse_terminated;
     let types = effects_parser
         .parse(attr)
@@ -34,12 +34,12 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         func.decl.output = syn::parse2(match func.decl.output {
             syn::ReturnType::Default => quote! {
                 -> eff::Unhandled<
-                    std::pin::Pin<std::boxed::Box<std::ops::Generator<Yield = #effects_type_name, Return = ()>>>,
+                    std::boxed::Box<std::ops::Generator<Yield = #effects_type_name, Return = ()> + '_>,
                 >
             },
             syn::ReturnType::Type(arrow, ty) => quote! {
                 #arrow eff::Unhandled<
-                    std::pin::Pin<std::boxed::Box<std::ops::Generator<Yield = #effects_type_name, Return = #ty>>>,
+                    std::boxed::Box<std::ops::Generator<Yield = #effects_type_name, Return = #ty> + '_>,
                 >
             },
         })
@@ -49,7 +49,7 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         func.block = syn::parse2(quote! {
             {
                 eff::Unhandled::new(
-                    std::boxed::Box::pin(#[allow(unreachable_code)] static move || {
+                    std::boxed::Box::new(#[allow(unreachable_code)] static move || {
                         if false {
                             yield unreachable!();
                         }
