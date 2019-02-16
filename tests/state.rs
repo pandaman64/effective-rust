@@ -42,7 +42,7 @@ fn do_something() -> String {
 
 #[test]
 fn test_state() {
-    use eff::WithEffect;
+    use eff::Effectful;
     use std::cell::Cell;
 
     let state = Cell::new(10);

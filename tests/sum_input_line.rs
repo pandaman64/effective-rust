@@ -5,19 +5,19 @@
 use eff::*;
 
 #[derive(Debug)]
-struct ConversionError(String);
-impl Effect for ConversionError {
+struct ConversionError<'a>(&'a str);
+impl Effect for ConversionError<'_> {
     type Output = usize;
 }
 
-fn sum_up(s: String) -> usize {
+fn sum_up(s: &str) -> usize {
     #[eff(ConversionError)]
-    fn read(s: String) -> usize {
+    fn read(s: &str) -> usize {
         let mut sum = 0_usize;
         for line in s.split('\n') {
             sum += match line.parse() {
                 Ok(x) => x,
-                Err(_e) => perform!(ConversionError(line.to_string())),
+                Err(_e) => perform!(ConversionError(line)),
             }
         }
         sum
@@ -44,5 +44,5 @@ foo
 
 "#;
 
-    assert_eq!(sum_up(lines.to_string()), 15);
+    assert_eq!(sum_up(lines), 15);
 }

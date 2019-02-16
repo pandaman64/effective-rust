@@ -49,7 +49,7 @@ macro_rules! invoke {
                 $crate::pin_mut!(eff);
                 loop {
                     let with_effect = $crate::pin_reexport::Pin::as_mut(&mut eff);
-                    match $crate::WithEffect::resume(with_effect) {
+                    match $crate::Effectful::resume(with_effect) {
                         $crate::Resolve::Done(x) => break x,
                         $crate::Resolve::Handled(x) => break x,
                         $crate::Resolve::NotHandled(e) => yield $crate::coproduct::Embed::embed(e),
@@ -80,7 +80,7 @@ where
     Resume(E::Output),
 }
 
-pub trait WithEffect<T, R>
+pub trait Effectful<T, R>
 where
     Self: Sized,
 {
@@ -120,21 +120,7 @@ where
     fn resume(self: Pin<&mut Self>) -> Resolve<T, R, Self::Effects>;
 }
 
-pub struct Unhandled<G> {
-    inner: G,
-}
-
-impl<G> Unhandled<G> {
-    pub fn new(inner: G) -> Self {
-        Unhandled { inner }
-    }
-}
-
-impl<G> Unhandled<G> {
-    unsafe_pinned!(inner: G);
-}
-
-impl<T, R, Effects, G> WithEffect<T, R> for Unhandled<G>
+impl<T, R, Effects, G> Effectful<T, R> for G
 where
     Self: Sized,
     G: Generator<Yield = Effects, Return = T>,
@@ -143,7 +129,7 @@ where
 
     #[inline]
     fn resume(self: Pin<&mut Self>) -> Resolve<T, R, Self::Effects> {
-        match self.inner().resume() {
+        match self.resume() {
             GeneratorState::Yielded(e) => Resolve::NotHandled(e),
             GeneratorState::Complete(v) => Resolve::Done(v),
         }
@@ -167,11 +153,11 @@ where
     unsafe_unpinned!(handler: H);
 }
 
-impl<T, R, WE, H, E, I> WithEffect<T, R> for Handled<WE, H, R, E, I>
+impl<T, R, WE, H, E, I> Effectful<T, R> for Handled<WE, H, R, E, I>
 where
     E: Effect,
-    WE: WithEffect<T, R>,
-    <WE as WithEffect<T, R>>::Effects: coproduct::Uninject<E, I>,
+    WE: Effectful<T, R>,
+    <WE as Effectful<T, R>>::Effects: coproduct::Uninject<E, I>,
     H: FnMut(E) -> HandlerResult<E, R>,
 {
     type Effects = <WE::Effects as coproduct::Uninject<E, I>>::Remainder;

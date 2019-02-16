@@ -33,14 +33,10 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         func.decl.output = syn::parse2(match func.decl.output {
             syn::ReturnType::Default => quote! {
-                -> eff::Unhandled<
-                    std::boxed::Box<std::ops::Generator<Yield = #effects_type_name, Return = ()> + '_>,
-                >
+                -> impl std::ops::Generator<Yield = #effects_type_name, Return = ()>
             },
             syn::ReturnType::Type(arrow, ty) => quote! {
-                #arrow eff::Unhandled<
-                    std::boxed::Box<std::ops::Generator<Yield = #effects_type_name, Return = #ty> + '_>,
-                >
+                #arrow impl std::ops::Generator<Yield = #effects_type_name, Return = #ty>
             },
         })
         .unwrap();
@@ -48,20 +44,22 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         let original_block = func.block;
         func.block = syn::parse2(quote! {
             {
-                eff::Unhandled::new(
-                    std::boxed::Box::new(#[allow(unreachable_code)] static move || {
-                        if false {
-                            yield unreachable!();
-                        }
+                static move || {
+                    if false {
+                        yield unreachable!();
+                    }
 
-                        #original_block
-                    })
-                )
+                    #original_block
+                }
             }
         })
         .unwrap();
 
-        ret.extend(quote! { #func });
+        // supress warning
+        ret.extend(quote! {
+            #[allow(unreachable_code)]
+            #func
+        });
 
         ret.into()
     } else {

@@ -24,7 +24,7 @@ fn foo() {
 
 #[test]
 fn test_attr() {
-    use eff::{HandlerResult, WithEffect};
+    use eff::{Effectful, HandlerResult};
 
     let e = foo();
     let e = e
