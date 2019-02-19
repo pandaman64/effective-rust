@@ -15,6 +15,9 @@ impl<T> Effect for Wrap<T> {
     type Output = !;
 }
 
+/// A location to save the output of an effect
+/// We can avoid the dynamic allocation of `Rc` once
+/// Rust supports "streaming generators" or we use some unsafe code.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Store<E>
 where
@@ -58,6 +61,7 @@ where
     }
 }
 
+/// The coproduct of effects
 pub enum Either<E, Rest>
 where
     E: Effect,
@@ -118,10 +122,12 @@ where
 {
 }
 
+/// A trait for constructing a coproduct from an effect
 pub trait Inject<E, Index>
 where
     E: Effect,
 {
+    /// Construct `Self` using an effect and a store
     fn inject(effect: E, store: Store<E>) -> Self;
 }
 
@@ -147,12 +153,18 @@ where
     }
 }
 
+/// A trait for destructing a coproduct into an effect
 pub trait Uninject<E, Index>
 where
     E: Effect,
 {
+    /// The other effect types of this coproduct
     type Remainder;
 
+    /// Retrieve an effect and a store from self if the type matches
+    ///
+    /// # Errors
+    /// If self holds an effect of a different type, this method returns an error.
     fn uninject(self) -> Result<(E, Store<E>), Self::Remainder>;
 }
 
@@ -188,7 +200,9 @@ where
     }
 }
 
+/// A trait for embedding self into a wider coproduct type
 pub trait Embed<Target, Indices> {
+    /// Embed self into the target type
     fn embed(self) -> Target;
 }
 
@@ -219,6 +233,7 @@ impl<F, Rest> Either<F, Rest>
 where
     F: Effect,
 {
+    /// Construct `Self` using an effect and a store
     #[inline]
     pub fn inject<E, Index>(effect: E, store: Store<E>) -> Self
     where
@@ -228,6 +243,11 @@ where
         Inject::inject(effect, store)
     }
 
+
+    /// Retrieve an effect and a store from self if the type matches
+    ///
+    /// # Errors
+    /// If self holds an effect of a different type, this method returns an error.
     #[inline]
     pub fn uninject<E, Index>(
         self,
@@ -239,6 +259,7 @@ where
         Uninject::uninject(self)
     }
 
+    /// Embed self into the target type
     #[inline]
     pub fn embed<Target, Indices>(self) -> Target
     where

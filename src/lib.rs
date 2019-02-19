@@ -50,10 +50,10 @@ macro_rules! invoke {
                 loop {
                     let with_effect = $crate::pin_reexport::Pin::as_mut(&mut eff);
                     match $crate::Effectful::resume(with_effect) {
-                        $crate::Resolve::Done(x) => break x,
-                        $crate::Resolve::Handled(x) => break x,
-                        $crate::Resolve::NotHandled(e) => yield $crate::coproduct::Embed::embed(e),
-                        $crate::Resolve::Continue => {}
+                        $crate::ComputationState::Done(x) => break x,
+                        $crate::ComputationState::Exit(x) => break x,
+                        $crate::ComputationState::Unhandled(e) => yield $crate::coproduct::Embed::embed(e),
+                        $crate::ComputationState::Continue => {}
                     }
                 }
             }
@@ -61,31 +61,43 @@ macro_rules! invoke {
     }};
 }
 
+/// A computational effect that will be resolved to `Output`
 pub trait Effect {
     type Output;
 }
 
-pub enum Resolve<T, R, E> {
+/// A state of an effectful computation
+pub enum ComputationState<T, R, E> {
+    /// An effect is handled and this computation is ready to continue
     Continue,
+    /// This computation is done
     Done(T),
-    Handled(R),
-    NotHandled(E),
+    /// An effect handler decide to terminate the computation
+    Exit(R),
+    /// There is an unhandled effect
+    Unhandled(E),
 }
 
+/// The result of handling an effect
 pub enum HandlerResult<E, R>
 where
     E: Effect,
 {
+    /// The handler decided to terminate the computation and return a value
     Exit(R),
+    /// The handler decided to continue the computation with the output
     Resume(E::Output),
 }
 
+/// An effectful computation
 pub trait Effectful<T, R>
 where
     Self: Sized,
 {
+    /// The coproduct type of effects this expression will produce
     type Effects;
 
+    /// Install an effect handler on this value
     #[inline]
     fn handle<E, Index, H>(self, handler: H) -> Handled<Self, H, R, E, Index>
     where
@@ -100,24 +112,35 @@ where
         }
     }
 
+    /// Evaluate this expression until 
+    /// 1) the computation finishes. In this case, the result will be converted by `effect_handler`;
+    /// 2) one of the effect handlers decided to finish the computation; or
+    /// 3) an effect is not handled
+    ///
+    /// # Errors
+    /// If the computation raises an effect and it is not handled by the handlers
+    /// associated with this expression, an error is returned.
     #[inline]
     fn run<VH>(self, value_handler: VH) -> Result<R, Self::Effects>
     where
         VH: FnOnce(T) -> R,
     {
+        use ComputationState::*;
+
         let this = self;
         pin_mut!(this);
         loop {
             match this.as_mut().resume() {
-                Resolve::Done(v) => return Ok(value_handler(v)),
-                Resolve::Handled(x) => return Ok(x),
-                Resolve::NotHandled(e) => return Err(e),
-                Resolve::Continue => {}
+                Done(v) => return Ok(value_handler(v)),
+                Exit(x) => return Ok(x),
+                Unhandled(e) => return Err(e),
+                Continue => {}
             }
         }
     }
 
-    fn resume(self: Pin<&mut Self>) -> Resolve<T, R, Self::Effects>;
+    /// Resume the execution of this expression
+    fn resume(self: Pin<&mut Self>) -> ComputationState<T, R, Self::Effects>;
 }
 
 impl<T, R, Effects, G> Effectful<T, R> for G
@@ -128,14 +151,19 @@ where
     type Effects = Effects;
 
     #[inline]
-    fn resume(self: Pin<&mut Self>) -> Resolve<T, R, Self::Effects> {
+    fn resume(self: Pin<&mut Self>) -> ComputationState<T, R, Self::Effects> {
+        use GeneratorState::*;
+        use ComputationState::*;
+
         match self.resume() {
-            GeneratorState::Yielded(e) => Resolve::NotHandled(e),
-            GeneratorState::Complete(v) => Resolve::Done(v),
+            Yielded(e) => Unhandled(e),
+            Complete(v) => Done(v),
         }
     }
 }
-
+ 
+/// An effectful computation with a handler for `E` installed.
+/// This struct is created by `handle` method.
 pub struct Handled<WE, H, R, E, I>
 where
     E: Effect,
@@ -163,20 +191,22 @@ where
     type Effects = <WE::Effects as coproduct::Uninject<E, I>>::Remainder;
 
     #[inline]
-    fn resume(mut self: Pin<&mut Self>) -> Resolve<T, R, Self::Effects> {
+    fn resume(mut self: Pin<&mut Self>) -> ComputationState<T, R, Self::Effects> {
+        use ComputationState::*;
+
         match self.as_mut().inner().resume() {
-            Resolve::Done(v) => Resolve::Done(v),
-            Resolve::Continue => Resolve::Continue,
-            Resolve::Handled(v) => Resolve::Handled(v),
-            Resolve::NotHandled(e) => match coproduct::Uninject::<E, I>::uninject(e) {
+            Done(v) => Done(v),
+            Continue => Continue,
+            Exit(v) => Exit(v),
+            Unhandled(e) => match coproduct::Uninject::<E, I>::uninject(e) {
                 Ok((effect, store)) => match self.handler()(effect) {
-                    HandlerResult::Exit(v) => Resolve::Handled(v),
+                    HandlerResult::Exit(v) => Exit(v),
                     HandlerResult::Resume(output) => {
                         store.set(output);
-                        Resolve::Continue
+                        ComputationState::Continue
                     }
                 },
-                Err(rem) => Resolve::NotHandled(rem),
+                Err(rem) => Unhandled(rem),
             },
         }
     }
