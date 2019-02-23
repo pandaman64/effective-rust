@@ -25,8 +25,10 @@ fn sum_up(s: &str) -> usize {
 
     let e = read(s);
     e.handle(|x| {
-        println!("conversion error: {:?}", x);
-        HandlerResult::Resume(0)
+        static move || {
+            println!("conversion error: {:?}", x);
+            resume!(0)
+        }
     })
     .run(|x| x)
     .unwrap()

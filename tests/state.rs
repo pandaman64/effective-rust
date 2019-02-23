@@ -34,9 +34,9 @@ fn double() -> String {
 
 #[eff::eff(GetState<usize>, SetState<usize>)]
 fn do_something() -> String {
-    let first = eff::invoke!(plus_one());
-    let second = eff::invoke!(double());
-    let third = eff::invoke!(plus_one());
+    let first = eff::perform_from!(plus_one());
+    let second = eff::perform_from!(double());
+    let third = eff::perform_from!(plus_one());
     format!("{}\n{}\n{}", first, second, third)
 }
 
@@ -46,10 +46,11 @@ fn test_state() {
     use std::cell::Cell;
 
     let state = Cell::new(10);
+    let state_ref = &state;
     assert_eq!(
         do_something()
-            .handle(|GetState(_)| eff::HandlerResult::Resume(state.get()))
-            .handle(|SetState(x)| eff::HandlerResult::Resume(state.set(x)))
+            .handle({ |GetState(_)| static move || eff::resume!(state_ref.get()) })
+            .handle({ |SetState(x)| static move || eff::resume!(state_ref.set(x)) })
             .run(|x| x)
             .unwrap(),
         "10\n11\n22"

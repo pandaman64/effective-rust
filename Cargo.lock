@@ -2,9 +2,9 @@
 # It is not intended for manual editing.
 [[package]]
 name = "eff"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
- "eff-attr 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "eff-attr 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "pin-utils 0.1.0-alpha.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro-hack 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "rich-phantoms 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "eff-attr"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "proc-macro-hack 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro2 0.4.27 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "eff-attr"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "proc-macro-hack 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -83,7 +83,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [metadata]
-"checksum eff-attr 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)" = "e8b49b4a015bd201cbdad6b8622bf079f2996ea0da5264d59d3708bd3323cb8d"
+"checksum eff-attr 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "d07e34a3a2bd670886eadd0e2eb75fa76fd6212521967e90d45d37e05692ff2e"
 "checksum pin-utils 0.1.0-alpha.4 (registry+https://github.com/rust-lang/crates.io-index)" = "5894c618ce612a3fa23881b152b608bafb8c56cfc22f434a3ba3120b40f7b587"
 "checksum proc-macro-hack 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)" = "3e90aa19cd73dedc2d0e1e8407473f073d735fef0ab521438de6da8ee449ab66"
 "checksum proc-macro2 0.4.27 (registry+https://github.com/rust-lang/crates.io-index)" = "4d317f9caece796be1980837fd5cb3dfec5613ebdb04ad0956deea83ce168915"

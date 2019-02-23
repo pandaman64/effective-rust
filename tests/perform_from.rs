@@ -23,22 +23,26 @@ fn inner() -> String {
 
 #[eff(Foo, Bar)]
 fn outer() -> usize {
-    let x = invoke!(inner());
+    let x = perform_from!(inner());
     let foo = perform!(Foo);
     x.len() + foo
 }
 
 #[test]
-fn test_invoke() {
+fn test_perform_from() {
     let e = outer();
     assert_eq!(
         e.handle(|Foo| {
-            println!("foo");
-            HandlerResult::Resume(42)
+            static move || {
+                println!("foo");
+                resume!(42)
+            }
         })
         .handle(|Bar(x)| {
-            println!("Bar({})", x);
-            HandlerResult::Resume(x * 2)
+            static move || {
+                println!("Bar({})", x);
+                resume!(x + 2)
+            }
         })
         .run(|x| x)
         .unwrap(),

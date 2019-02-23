@@ -25,7 +25,7 @@ mod effects {
 #[test]
 fn test_example() {
     #[eff(Foo, Bar, effects::Baz)]
-    fn expr_with_effect() -> char {
+    fn effectful_computation() -> char {
         let i1 = perform!(Foo(1));
         let i2 = perform!(Foo(4));
         let s = perform!(Bar);
@@ -35,22 +35,31 @@ fn test_example() {
         s.chars().nth(i1 + i2).unwrap()
     }
 
-    let e = expr_with_effect();
+    let e = effectful_computation();
     let result = e
         .handle(|Foo(x)| {
-            println!("foo");
-            HandlerResult::Resume(x + 1)
+            static move || {
+                println!("foo");
+                resume!(x + 1)
+            }
         })
         .handle(|Bar| {
-            println!("bar");
-            HandlerResult::Resume("Hello, World!".into())
+            static move || {
+                println!("bar");
+                resume!("Hello, World!".into())
+            }
         })
         .handle(|effects::Baz| {
-            println!("baz");
-            HandlerResult::Exit('x')
+            static move || {
+                if false {
+                    yield unreachable!()
+                }
+                println!("baz");
+                'x'
+            }
         })
         .run(|x| x)
         .unwrap();
 
-    assert_eq!(result, 'W');
+    assert_eq!(result, "Hello, World!".chars().nth(7).unwrap());
 }

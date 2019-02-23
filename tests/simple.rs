@@ -17,7 +17,7 @@ fn test_simple() {
 
     let e = f();
     assert_eq!(
-        e.handle(|Eff| HandlerResult::Resume("Hello".into()))
+        e.handle(|Eff| { static move || { resume!("Hello".into()) } })
             .run(|x| x)
             .unwrap(),
         "Hello"

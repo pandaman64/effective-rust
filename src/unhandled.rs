@@ -1,65 +1,6 @@
-use super::Effect;
-use rich_phantoms::PhantomCovariantAlwaysSendSync;
+use super::{Effect, Store, Succ, Wrap, Zero};
 
-use std::cell::RefCell;
 use std::fmt;
-use std::rc::Rc;
-
-pub enum Zero {}
-pub struct Succ<T>(PhantomCovariantAlwaysSendSync<T>);
-
-pub struct Wrap<T>(T);
-
-/// Hacky impl for type-level list
-impl<T> Effect for Wrap<T> {
-    type Output = !;
-}
-
-/// A location to save the output of an effect
-/// We can avoid the dynamic allocation of `Rc` once
-/// Rust supports "streaming generators" or we use some unsafe code.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Store<E>
-where
-    E: Effect,
-{
-    inner: Rc<RefCell<Option<E::Output>>>,
-}
-
-impl<E> std::default::Default for Store<E>
-where
-    E: Effect,
-{
-    fn default() -> Self {
-        Store {
-            inner: Default::default(),
-        }
-    }
-}
-
-impl<E> Clone for Store<E>
-where
-    E: Effect,
-{
-    fn clone(&self) -> Self {
-        Store {
-            inner: Rc::clone(&self.inner),
-        }
-    }
-}
-
-impl<E> Store<E>
-where
-    E: Effect,
-{
-    pub fn get(&self) -> E::Output {
-        self.inner.borrow_mut().take().unwrap()
-    }
-
-    pub fn set(&self, v: E::Output) {
-        *self.inner.borrow_mut() = Some(v);
-    }
-}
 
 /// The coproduct of effects
 pub enum Either<E, Rest>
@@ -68,19 +9,6 @@ where
 {
     A(E, Store<E>),
     B(Rest),
-}
-
-impl<E, Rest> Clone for Either<E, Rest>
-where
-    E: Effect + Clone,
-    Rest: Clone,
-{
-    fn clone(&self) -> Self {
-        match self {
-            Either::A(effect, store) => Either::A(effect.clone(), store.clone()),
-            Either::B(rest) => Either::B(rest.clone()),
-        }
-    }
 }
 
 impl<E, Rest> fmt::Debug for Either<E, Rest>
@@ -95,31 +23,6 @@ where
             Either::B(rest) => write!(f, "{:?}", rest),
         }
     }
-}
-
-impl<E, Rest> PartialEq for Either<E, Rest>
-where
-    E: Effect + PartialEq,
-    E::Output: PartialEq,
-    Rest: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        use self::Either::*;
-
-        match (self, other) {
-            (A(x, xstore), A(y, ystore)) => x == y && xstore == ystore,
-            (B(x), B(y)) => x == y,
-            _ => false,
-        }
-    }
-}
-
-impl<E, Rest> Eq for Either<E, Rest>
-where
-    E: Effect + Eq,
-    E::Output: Eq,
-    Rest: Eq,
-{
 }
 
 /// A trait for constructing a coproduct from an effect
@@ -242,7 +145,6 @@ where
     {
         Inject::inject(effect, store)
     }
-
 
     /// Retrieve an effect and a store from self if the type matches
     ///
