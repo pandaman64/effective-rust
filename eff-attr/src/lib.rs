@@ -20,7 +20,6 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
     let types = effects_parser
         .parse(attr)
         .expect("failed to parse attribute");
-    let types = &types;
 
     let item: syn::Item = syn::parse(item).expect("failed to parse item");
 
@@ -28,7 +27,7 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         let mut ret = TokenStream2::new();
 
         let effects_type_name = quote! {
-            eff::Coproduct![#types]
+            eff::Unhandled![#types]
         };
 
         func.decl.output = syn::parse2(match func.decl.output {
