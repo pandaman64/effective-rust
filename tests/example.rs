@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait, try_from, never_type)]
+#![feature(generators, generator_trait, never_type)]
 
 use eff::*;
 
@@ -37,29 +37,41 @@ fn test_example() {
 
     let e = effectful_computation();
     let result = e
-        .handle(|Foo(x)| {
-            static move || {
-                println!("foo");
-                resume!(x + 1)
-            }
-        })
-        .handle(|Bar| {
-            static move || {
-                println!("bar");
-                resume!("Hello, World!".into())
-            }
-        })
-        .handle(|effects::Baz| {
-            static move || {
-                if false {
-                    yield unreachable!()
-                }
-                println!("baz");
-                'x'
-            }
-        })
-        .run(|x| x)
-        .unwrap();
+        .handle(
+            |x| eff::pure(x).embed(),
+            |e| {
+                e.on(|Foo(x), store| {
+                    static move || {
+                        println!("foo");
+                        perform!(store.set(x + 1))
+                    }
+                })
+            },
+        )
+        .handle(
+            |x| eff::pure(x).embed(),
+            |e| {
+                e.on(|Bar, store| {
+                    static move || {
+                        println!("bar");
+                        perform!(store.set("Hello, World!".into()))
+                    }
+                })
+            },
+        )
+        .handle(
+            |x| eff::pure(x).embed(),
+            |e| {
+                e.on(|effects::Baz, _store| {
+                    eff::lazy(|| {
+                        println!("baz");
+                        'x'
+                    })
+                    .embed()
+                })
+            },
+        )
+        .run();
 
     assert_eq!(result, "Hello, World!".chars().nth(7).unwrap());
 }

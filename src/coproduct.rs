@@ -1,6 +1,68 @@
-use super::{Effect, Store, Succ, Wrap, Zero};
+use super::{Effect, Resume};
 
+use std::cell::RefCell;
 use std::fmt;
+use std::marker::PhantomData;
+use std::rc::Rc;
+
+use rich_phantoms::PhantomCovariantAlwaysSendSync;
+
+pub enum Zero {}
+pub struct Succ<T>(PhantomCovariantAlwaysSendSync<T>);
+
+pub struct Wrap<T>(T);
+
+/// Hacky impl for type-level list
+impl<T> Effect for Wrap<T> {
+    type Output = !;
+}
+
+/// A location to save the output of an effect
+/// We can avoid the dynamic allocation of `Rc` once
+/// Rust supports "streaming generators" or we use some unsafe code.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Store<E>
+where
+    E: Effect,
+{
+    inner: Rc<RefCell<Option<E::Output>>>,
+}
+
+impl<E> std::default::Default for Store<E>
+where
+    E: Effect,
+{
+    fn default() -> Self {
+        Store {
+            inner: Default::default(),
+        }
+    }
+}
+
+impl<E> Clone for Store<E>
+where
+    E: Effect,
+{
+    fn clone(&self) -> Self {
+        Store {
+            inner: Rc::clone(&self.inner),
+        }
+    }
+}
+
+impl<E> Store<E>
+where
+    E: Effect,
+{
+    pub fn get(&self) -> E::Output {
+        self.inner.borrow_mut().take().unwrap()
+    }
+
+    pub fn set<R>(self, v: E::Output) -> Resume<R> {
+        *self.inner.borrow_mut() = Some(v);
+        Resume(PhantomData)
+    }
+}
 
 /// The coproduct of effects
 pub enum Either<E, Rest>
@@ -132,6 +194,51 @@ where
     }
 }
 
+pub trait Subset<Target, Indices> {
+    type Remainder;
+
+    fn subset(self) -> Result<Target, Self::Remainder>;
+}
+
+impl<E, Rest> Subset<!, !> for Either<E, Rest>
+where
+    E: Effect,
+{
+    type Remainder = Self;
+
+    #[inline]
+    fn subset(self) -> Result<!, Self::Remainder> {
+        Err(self)
+    }
+}
+
+impl<T, E, Rest, HeadIndex, TailIndices>
+    Subset<Either<E, Rest>, Either<Wrap<HeadIndex>, TailIndices>> for T
+where
+    E: Effect,
+    T: Uninject<E, HeadIndex>,
+    <T as Uninject<E, HeadIndex>>::Remainder: Subset<Rest, TailIndices>,
+{
+    type Remainder =
+        <<T as Uninject<E, HeadIndex>>::Remainder as Subset<Rest, TailIndices>>::Remainder;
+
+    #[inline]
+    fn subset(self) -> Result<Either<E, Rest>, Self::Remainder> {
+        match self.uninject() {
+            Ok((effect, store)) => Ok(Either::A(effect, store)),
+            Err(rem) => rem.subset().map(Either::B),
+        }
+    }
+}
+
+#[test]
+fn test_subset() {
+    let x: super::Unhandled![Wrap<u32>, Wrap<i64>] =
+        Inject::inject(Wrap(42_u32), Default::default());
+    let y: Result<super::Unhandled![Wrap<u32>], _> = x.subset();
+    assert!(y.is_ok());
+}
+
 impl<F, Rest> Either<F, Rest>
 where
     F: Effect,
@@ -159,6 +266,19 @@ where
         Self: Uninject<E, Index>,
     {
         Uninject::uninject(self)
+    }
+
+    #[inline]
+    pub fn on<Func, E, R, Index>(
+        self,
+        f: Func,
+    ) -> Result<R, <Self as Uninject<E, Index>>::Remainder>
+    where
+        Func: FnOnce(E, Store<E>) -> R,
+        E: Effect,
+        Self: Uninject<E, Index>,
+    {
+        self.uninject().map(|(e, store)| f(e, store))
     }
 
     /// Embed self into the target type

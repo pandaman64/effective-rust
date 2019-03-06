@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait, try_from, never_type)]
+#![feature(generators, generator_trait, never_type)]
 
 use eff::*;
 
@@ -17,9 +17,11 @@ fn test_simple() {
 
     let e = f();
     assert_eq!(
-        e.handle(|Eff| { static move || { resume!("Hello".into()) } })
-            .run(|x| x)
-            .unwrap(),
+        e.handle(
+            |x| eff::pure(x).embed(),
+            |e| { e.on(|Eff, store| static move || perform!(store.set("Hello".into()))) }
+        )
+        .run(),
         "Hello"
     );
 }

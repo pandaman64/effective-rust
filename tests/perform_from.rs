@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait, try_from, never_type)]
+#![feature(generators, generator_trait, never_type)]
 
 use eff::*;
 
@@ -32,20 +32,29 @@ fn outer() -> usize {
 fn test_perform_from() {
     let e = outer();
     assert_eq!(
-        e.handle(|Foo| {
-            static move || {
-                println!("foo");
-                resume!(42)
+        e.handle(
+            |x| pure(x).embed(),
+            |e| {
+                e.on(|Foo, store| {
+                    static move || {
+                        println!("foo");
+                        perform!(store.set(42))
+                    }
+                })
             }
-        })
-        .handle(|Bar(x)| {
-            static move || {
-                println!("Bar({})", x);
-                resume!(x + 2)
+        )
+        .handle(
+            |x| pure(x).embed(),
+            |e| {
+                e.on(|Bar(x), store| {
+                    static move || {
+                        println!("Bar({})", x);
+                        perform!(store.set(x + 2))
+                    }
+                })
             }
-        })
-        .run(|x| x)
-        .unwrap(),
+        )
+        .run(),
         44
     );
 }

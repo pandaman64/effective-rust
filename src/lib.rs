@@ -1,84 +1,16 @@
-#![feature(
-    nll,
-    generators,
-    generator_trait,
-    never_type,
-    specialization,
-    core_intrinsics
-)]
-#![feature(trace_macros)]
+#![feature(nll, generators, generator_trait, never_type)]
 
-use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
-use std::rc::Rc;
 
-use pin_utils::{unsafe_pinned, unsafe_unpinned};
 use rich_phantoms::PhantomCovariantAlwaysSendSync;
 
 pub use eff_attr::eff;
 pub use pin_utils::pin_mut;
 pub use std::pin as pin_reexport;
 
-pub mod handled;
-pub mod unhandled;
-
-pub enum Zero {}
-pub struct Succ<T>(PhantomCovariantAlwaysSendSync<T>);
-
-pub struct Wrap<T>(T);
-
-/// Hacky impl for type-level list
-impl<T> Effect for Wrap<T> {
-    type Output = !;
-}
-
-/// A location to save the output of an effect
-/// We can avoid the dynamic allocation of `Rc` once
-/// Rust supports "streaming generators" or we use some unsafe code.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Store<E>
-where
-    E: Effect,
-{
-    inner: Rc<RefCell<Option<E::Output>>>,
-}
-
-impl<E> std::default::Default for Store<E>
-where
-    E: Effect,
-{
-    fn default() -> Self {
-        Store {
-            inner: Default::default(),
-        }
-    }
-}
-
-impl<E> Clone for Store<E>
-where
-    E: Effect,
-{
-    fn clone(&self) -> Self {
-        Store {
-            inner: Rc::clone(&self.inner),
-        }
-    }
-}
-
-impl<E> Store<E>
-where
-    E: Effect,
-{
-    pub fn get(&self) -> E::Output {
-        self.inner.borrow_mut().take().unwrap()
-    }
-
-    pub fn set(&self, v: E::Output) {
-        *self.inner.borrow_mut() = Some(v);
-    }
-}
+pub mod coproduct;
 
 #[macro_export]
 macro_rules! Unhandled {
@@ -86,15 +18,15 @@ macro_rules! Unhandled {
         !
     };
     ($head:ty $(,$tail:ty)* $(,)?) => {
-        $crate::unhandled::Either<$head, $crate::Unhandled![$($tail),*]>
+        $crate::coproduct::Either<$head, $crate::Unhandled![$($tail),*]>
     };
 }
 
 #[macro_export]
 macro_rules! perform {
     ($eff:expr) => {{
-        let store = $crate::Store::default();
-        yield $crate::unhandled::Inject::inject($eff, store.clone());
+        let store = $crate::coproduct::Store::default();
+        yield $crate::coproduct::Inject::inject($eff, store.clone());
         store.get()
     }};
 }
@@ -109,16 +41,8 @@ macro_rules! perform_from {
                     let with_effect = $crate::pin_reexport::Pin::as_mut(&mut eff);
                     match $crate::Effectful::resume(with_effect) {
                         $crate::ComputationState::Done(x) => break x,
-                        $crate::ComputationState::Exit(x) => break x,
-                        $crate::ComputationState::Handled(h) => {
-                            break $crate::handled::Run::run(
-                                h,
-                                $crate::pin_reexport::Pin::as_mut(&mut eff),
-                                |x| x,
-                            )
-                        }
-                        $crate::ComputationState::Unhandled(e) => {
-                            yield $crate::unhandled::Embed::embed(e)
+                        $crate::ComputationState::Effect(e) => {
+                            yield $crate::coproduct::Embed::embed(e)
                         }
                     }
                 }
@@ -127,178 +51,256 @@ macro_rules! perform_from {
     }};
 }
 
-#[macro_export]
-macro_rules! resume {
-    ($e:expr) => {{
-        let store = $crate::Store::default();
-        yield ($crate::Resume::new($e), store.clone());
-        store.get()
-    }};
-}
-
 /// A computational effect that will be resolved to `Output`
 pub trait Effect {
     type Output;
 }
 
-/// A state of an effectful computation
-pub enum ComputationState<T, R, Handled, Unhandled> {
-    /// This computation is done
-    Done(T),
-    /// An effect handler decide to terminate the computation
-    Exit(R),
-    /// An effect is handled
-    Handled(Handled),
-    /// There is an unhandled effect
-    Unhandled(Unhandled),
-}
+pub struct Resume<R>(PhantomCovariantAlwaysSendSync<R>);
 
-pub struct Resume<E: Effect, R>(E::Output, PhantomCovariantAlwaysSendSync<R>);
-
-impl<E, R> Resume<E, R>
-where
-    E: Effect,
-{
-    pub fn new(v: E::Output) -> Self {
-        Resume(v, PhantomData)
-    }
-}
-
-impl<E, R> Effect for Resume<E, R>
-where
-    E: Effect,
-{
+impl<R> Effect for Resume<R> {
     type Output = R;
 }
 
-pub struct Identity<T>(T);
-
-impl<T> Effect for Identity<T> {
-    type Output = T;
+/// A state of an effectful computation
+pub enum ComputationState<T, Effects> {
+    /// This computation is done
+    Done(T),
+    /// An effect is thrown
+    Effect(Effects),
 }
 
 /// An effectful computation
-pub trait Effectful<T, R>
+pub trait Effectful<T, Effects>
 where
     Self: Sized,
 {
-    /// Effect types that is already handled
-    type Handled: handled::Run<R>;
-
-    /// Effect types that is not handled yet
-    type Unhandled;
-
-    /// Install an effect handler on this value
     #[inline]
-    fn handle<E, Index, H, G>(self, handler: H) -> Handled<Self, H, R, E, Index, G>
+    fn handle<NewEffects, VH, H, VHC, HC, U>(
+        self,
+        value_handler: VH,
+        handler: H,
+    ) -> Handled<NewEffects, Self, T, Effects, VHC, HC, VH, H, U>
     where
-        E: Effect,
-        Self::Unhandled: unhandled::Uninject<E, Index>,
-        H: FnMut(E) -> G,
-        G: Generator<Yield = (Resume<E, R>, Store<Identity<R>>), Return = R>,
+        VH: FnOnce(T) -> VHC,
+        H: FnMut(Effects) -> Result<HC, NewEffects>,
+        VHC: Effectful<U, NewEffects>,
+        HC: Effectful<U, coproduct::Either<Resume<U>, NewEffects>>,
     {
         Handled {
-            inner: self,
+            source: self,
+            value_handler: Some(value_handler),
             handler,
+            handler_stack: vec![],
+            state: ActiveComputation::Source,
             phantom: PhantomData,
         }
     }
 
-    /// Evaluate this expression until
-    /// 1) the computation finishes. In this case, the result will be converted by `effect_handler`;
-    /// 2) one of the effect handlers decided to finish the computation; or
-    /// 3) an effect is not handled
-    ///
-    /// # Errors
-    /// If the computation raises an effect and it is not handled by the handlers
-    /// associated with this expression, an error is returned.
     #[inline]
-    fn run<VH>(self, value_handler: VH) -> Result<R, Self::Unhandled>
-    where
-        VH: FnOnce(T) -> R,
-        Self::Handled: handled::Run<R>,
-    {
-        use ComputationState::*;
-
-        let this = self;
-        pin_mut!(this);
-        match this.as_mut().resume() {
-            Done(v) => Ok(value_handler(v)),
-            Exit(x) => Ok(x),
-            Handled(x) => Ok(handled::Run::run(x, this, value_handler)),
-            Unhandled(e) => Err(e),
-        }
+    fn embed<Indices>(self) -> EmbedEffect<Self, Effects, Indices> {
+        EmbedEffect(self, PhantomData)
     }
 
     /// Resume the execution of this expression
-    fn resume(self: Pin<&mut Self>) -> ComputationState<T, R, Self::Handled, Self::Unhandled>;
+    fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects>;
 }
 
-impl<T, R, Effects, G> Effectful<T, R> for G
+pub struct Lazy<F>(Option<F>);
+
+impl<T, F> Effectful<T, !> for Lazy<F>
+where
+    F: FnOnce() -> T,
+{
+    fn resume(self: Pin<&mut Self>) -> ComputationState<T, !> {
+        // TODO: verify soundness
+        unsafe {
+            let this = self.get_unchecked_mut();
+            ComputationState::Done(this.0.take().expect("resume after completion")())
+        }
+    }
+}
+
+pub fn lazy<T, F>(v: F) -> impl Effectful<T, !>
+where
+    F: FnOnce() -> T,
+{
+    Lazy(Some(v))
+}
+
+pub fn pure<T>(v: T) -> impl Effectful<T, !> {
+    lazy(move || v)
+}
+
+pub enum Either<L, R> {
+    A(L),
+    B(R),
+}
+
+impl<T, Effects, L, R> Effectful<T, Effects> for Either<L, R>
+where
+    L: Effectful<T, Effects>,
+    R: Effectful<T, Effects>,
+{
+    fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects> {
+        use Either::*;
+
+        // TODO: verify soundness
+        unsafe {
+            let this = self.get_unchecked_mut();
+            match this {
+                A(ref mut left) => Pin::new_unchecked(left).resume(),
+                B(ref mut right) => Pin::new_unchecked(right).resume(),
+            }
+        }
+    }
+}
+
+pub struct EmbedEffect<C, Smaller, Indices>(C, PhantomCovariantAlwaysSendSync<(Smaller, Indices)>);
+
+impl<C, T, Smaller, Larger, Indices> Effectful<T, Larger> for EmbedEffect<C, Smaller, Indices>
+where
+    C: Effectful<T, Smaller>,
+    Smaller: coproduct::Embed<Larger, Indices>,
+{
+    fn resume(self: Pin<&mut Self>) -> ComputationState<T, Larger> {
+        use ComputationState::*;
+
+        unsafe {
+            match self.map_unchecked_mut(|x| &mut x.0).resume() {
+                Done(v) => Done(v),
+                Effect(e) => Effect(e.embed()),
+            }
+        }
+    }
+}
+
+impl<T, Effects, G> Effectful<T, Effects> for G
 where
     Self: Sized,
     G: Generator<Yield = Effects, Return = T>,
 {
-    type Handled = !;
-    type Unhandled = Effects;
-
     #[inline]
-    fn resume(self: Pin<&mut Self>) -> ComputationState<T, R, Self::Handled, Self::Unhandled> {
+    fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects> {
         use ComputationState::*;
         use GeneratorState::*;
 
         match self.resume() {
             Complete(v) => Done(v),
-            Yielded(e) => Unhandled(e),
+            Yielded(e) => Effect(e),
         }
     }
 }
 
-/// An effectful computation with a handler for `E` installed.
-/// This struct is created by `handle` method.
-pub struct Handled<WE, H, R, E, I, G>
-where
-    E: Effect,
-{
-    inner: WE,
+pub struct Handled<NewEffects, C, T, Effects, VHC, HC, VH, H, U> {
+    source: C,
+    value_handler: Option<VH>,
     handler: H,
-    phantom: PhantomCovariantAlwaysSendSync<(R, E, I, G)>,
+    handler_stack: Vec<(Option<coproduct::Store<Resume<U>>>, Box<HC>)>,
+    state: ActiveComputation<VHC>,
+    phantom: PhantomCovariantAlwaysSendSync<(T, Effects, NewEffects)>,
 }
 
-impl<WE, H, R, E, I, G> Handled<WE, H, R, E, I, G>
-where
-    E: Effect,
-{
-    unsafe_pinned!(inner: WE);
-    unsafe_unpinned!(handler: H);
+enum ActiveComputation<VHC> {
+    Source,
+    Handler,
+    ValueHandler(VHC),
 }
 
-impl<T, R, WE, H, E, I, G> Effectful<T, R> for Handled<WE, H, R, E, I, G>
+impl<C, T, OriginalEffects, VHC, HC, VH, H, U, Effects> Effectful<U, Effects>
+    for Handled<Effects, C, T, OriginalEffects, VHC, HC, VH, H, U>
 where
-    E: Effect,
-    WE: Effectful<T, R>,
-    <WE as Effectful<T, R>>::Unhandled: unhandled::Uninject<E, I>,
-    H: FnMut(E) -> G,
-    G: Generator<Yield = (Resume<E, R>, Store<Identity<R>>), Return = R>,
+    VH: FnOnce(T) -> VHC,
+    H: FnMut(OriginalEffects) -> Result<HC, Effects>,
+    C: Effectful<T, OriginalEffects>,
+    VHC: Effectful<U, Effects>,
+    HC: Effectful<U, coproduct::Either<Resume<U>, Effects>>,
 {
-    type Handled = handled::Either<E, G, WE::Handled>;
-    type Unhandled = <WE::Unhandled as unhandled::Uninject<E, I>>::Remainder;
-
+    // I'm not sure whether this inline improves the performance;
+    // this method is much larger than I expected
     #[inline]
-    fn resume(mut self: Pin<&mut Self>) -> ComputationState<T, R, Self::Handled, Self::Unhandled> {
+    fn resume(mut self: Pin<&mut Self>) -> ComputationState<U, Effects> {
         use ComputationState::*;
 
-        match self.as_mut().inner().resume() {
-            Done(v) => Done(v),
-            Exit(v) => Exit(v),
-            Handled(v) => Handled(handled::Either::B(v)),
-            Unhandled(e) => match unhandled::Uninject::uninject(e) {
-                Ok((effect, store)) => {
-                    let handler = self.handler()(effect);
-                    Handled(handled::Inject::inject(handler, store))
+        // TODO: verify soundness
+        unsafe {
+            let this = self.as_mut().get_unchecked_mut();
+            loop {
+                match &mut this.state {
+                    ActiveComputation::Source => {
+                        match Pin::new_unchecked(&mut this.source).resume() {
+                            Done(v) => {
+                                this.state = ActiveComputation::ValueHandler(this
+                                    .value_handler
+                                    .take()
+                                    .expect("resume after completion")(
+                                    v
+                                ));
+                            }
+                            Effect(e) => match (this.handler)(e) {
+                                Ok(x) => {
+                                    this.handler_stack.push((None, Box::new(x)));
+                                    this.state = ActiveComputation::Handler;
+                                }
+                                Err(e) => return Effect(e),
+                            },
+                        }
+                    }
+                    ActiveComputation::Handler => {
+                        let (ref mut store, ref mut handler) =
+                            this.handler_stack.last_mut().unwrap();
+                        match Pin::new_unchecked(&mut **handler).resume() {
+                            Done(v) => {
+                                this.handler_stack.pop();
+                                match this.handler_stack.last_mut() {
+                                    Some((ref mut store, ref mut _handler)) => {
+                                        store.take().unwrap().set::<!>(v);
+                                    }
+                                    None => return Done(v),
+                                }
+                            }
+                            Effect(coproduct::Either::A(_resume, s)) => {
+                                assert!(store.is_none());
+                                *store = Some(s);
+                                this.state = ActiveComputation::Source;
+                            }
+                            Effect(coproduct::Either::B(e)) => return Effect(e),
+                        }
+                    }
+                    ActiveComputation::ValueHandler(ref mut x) => {
+                        match Pin::new_unchecked(x).resume() {
+                            Done(v) => match this.handler_stack.last_mut() {
+                                None => return Done(v),
+                                Some(&mut (ref mut store, ref mut _handler)) => {
+                                    store.take().unwrap().set::<!>(v);
+                                    this.state = ActiveComputation::Handler;
+                                }
+                            },
+                            Effect(e) => return Effect(e),
+                        }
+                    }
                 }
-                Err(rem) => Unhandled(rem),
-            },
+            }
+        }
+    }
+}
+
+pub trait Pure<T> {
+    fn run(self) -> T;
+}
+
+impl<C, T> Pure<T> for C
+where
+    C: Effectful<T, !>,
+{
+    fn run(self) -> T {
+        use ComputationState::*;
+
+        let this = self;
+        pin_mut!(this);
+        match this.resume() {
+            Done(v) => v,
+            Effect(e) => e,
         }
     }
 }

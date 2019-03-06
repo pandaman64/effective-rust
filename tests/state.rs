@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait, try_from, never_type)]
+#![feature(generators, generator_trait, never_type)]
 
 use rich_phantoms::PhantomCovariantAlwaysSendSync;
 
@@ -42,17 +42,30 @@ fn do_something() -> String {
 
 #[test]
 fn test_state() {
-    use eff::Effectful;
+    use eff::{Effectful, Pure};
     use std::cell::Cell;
 
     let state = Cell::new(10);
     let state_ref = &state;
     assert_eq!(
         do_something()
-            .handle({ |GetState(_)| static move || eff::resume!(state_ref.get()) })
-            .handle({ |SetState(x)| static move || eff::resume!(state_ref.set(x)) })
-            .run(|x| x)
-            .unwrap(),
+            .handle(
+                |x| eff::pure(x).embed(),
+                |e| {
+                    match e.uninject() {
+                        Ok((GetState(_), store)) => Ok(eff::Either::A(static move || {
+                            eff::perform!(store.set(state_ref.get()))
+                        })),
+                        Err(e) => match e.uninject() {
+                            Ok((SetState(x), store)) => Ok(eff::Either::B(static move || {
+                                eff::perform!(store.set(state_ref.set(x)))
+                            })),
+                            Err(_) => unreachable!(),
+                        },
+                    }
+                }
+            )
+            .run(),
         "10\n11\n22"
     );
     assert_eq!(state.into_inner(), 23);

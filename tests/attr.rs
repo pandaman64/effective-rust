@@ -1,5 +1,4 @@
-#![feature(generators, generator_trait, try_from, never_type)]
-#![feature(trace_macros)]
+#![feature(generators, generator_trait, never_type)]
 
 #[derive(Debug)]
 struct Eff;
@@ -26,26 +25,28 @@ fn foo() {
 
 #[test]
 fn test_attr() {
-    use eff::Effectful;
+    use eff::{Effectful, Pure};
 
     let e = foo();
-    let e = e
-        .handle(|_: Eff| {
-            static move || {
-                eff::resume!(());
-                println!("eff");
-            }
-        })
-        .handle(|_: hoge::Hoge| {
-            static move || {
-                if false {
-                    yield unreachable!()
+    e.handle(
+        |()| eff::pure(println!("done 1")).embed(),
+        |e| {
+            e.on(|Eff, store| {
+                static move || {
+                    eff::perform!(store.set(println!("eff")));
                 }
-                println!("hoge");
-            }
-        });
-    e.run(|()| {
-        println!("done");
-    })
-    .unwrap();
+            })
+        },
+    )
+    .handle(
+        |()| eff::pure(println!("done 2")),
+        |e| {
+            e.on(|hoge::Hoge, store| {
+                static move || {
+                    eff::perform!(store.set(println!("hoge")));
+                }
+            })
+        },
+    )
+    .run();
 }

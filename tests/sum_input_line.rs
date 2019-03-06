@@ -1,6 +1,6 @@
 //! 1.1. Recovering from errors
 
-#![feature(generators, generator_trait, try_from, never_type)]
+#![feature(generators, generator_trait, never_type)]
 
 use eff::*;
 
@@ -24,14 +24,18 @@ fn sum_up(s: &str) -> usize {
     }
 
     let e = read(s);
-    e.handle(|x| {
-        static move || {
-            println!("conversion error: {:?}", x);
-            resume!(0)
-        }
-    })
-    .run(|x| x)
-    .unwrap()
+    e.handle(
+        |x| pure(x).embed(),
+        |e| {
+            e.on(|ConversionError(x), store| {
+                static move || {
+                    println!("conversion error: {:?}", x);
+                    perform!(store.set(0))
+                }
+            })
+        },
+    )
+    .run()
 }
 
 #[test]
