@@ -277,6 +277,29 @@ where
         self.uninject().map(|(e, sender)| f(e, sender))
     }
 
+    #[inline]
+    pub fn on2<R, Func1, E1, Index1, Func2, E2, Index2>(
+        self,
+        f1: Func1,
+        f2: Func2,
+    ) -> Result<R, <<Self as Uninject<E1, Index1>>::Remainder as Uninject<E2, Index2>>::Remainder>
+    where
+        E1: Effect,
+        Func1: FnOnce(E1, Sender<E1>) -> R,
+        E2: Effect,
+        Func2: FnOnce(E2, Sender<E2>) -> R,
+        Self: Uninject<E1, Index1>,
+        <Self as Uninject<E1, Index1>>::Remainder: Uninject<E2, Index2>,
+    {
+        match self.uninject() {
+            Ok((e, sender)) => Ok(f1(e, sender)),
+            Err(e) => match e.uninject() {
+                Ok((e, sender)) => Ok(f2(e, sender)),
+                Err(e) => Err(e),
+            },
+        }
+    }
+
     /// Embed self into the target type
     #[inline]
     pub fn embed<Target, Indices>(self) -> Target

@@ -52,17 +52,14 @@ fn test_state() {
             .handle(
                 |x| eff::pure(x).embed(),
                 |e| {
-                    match e.uninject() {
-                        Ok((GetState(_), k)) => Ok(eff::Either::A(static move || {
-                            eff::perform!(k.continuation(state_ref.get()))
-                        })),
-                        Err(e) => match e.uninject() {
-                            Ok((SetState(x), k)) => Ok(eff::Either::B(static move || {
-                                eff::perform!(k.continuation(state_ref.set(x)))
-                            })),
-                            Err(_) => unreachable!(),
+                    e.on2(
+                        |GetState(_), k| {
+                            (static move || eff::perform!(k.continuation(state_ref.get()))).left()
                         },
-                    }
+                        |SetState(x), k| {
+                            (static move || eff::perform!(k.continuation(state_ref.set(x)))).right()
+                        },
+                    )
                 }
             )
             .run(),

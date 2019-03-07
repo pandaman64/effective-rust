@@ -111,6 +111,22 @@ pub trait Effectful<T, Effects> {
         Boxed(Box::new(self))
     }
 
+    #[inline]
+    fn left<R>(self) -> Either<Self, R>
+    where
+        Self: Sized,
+    {
+        Either::A(self)
+    }
+
+    #[inline]
+    fn right<L>(self) -> Either<L, Self>
+    where
+        Self: Sized,
+    {
+        Either::B(self)
+    }
+
     /// Resume the execution of this expression
     fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects>;
 }
