@@ -1,6 +1,6 @@
 [package]
 name = "eff"
-version = "0.0.4"
+version = "0.0.5"
 authors = ["pan"]
 edition = "2018"
 
@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-eff-attr = "0.0.4"
+eff-attr = "0.0.5"
 proc-macro-hack = "0.5.4"
 rich-phantoms = "0.1.0"
 pin-utils = "0.1.0-alpha.4"

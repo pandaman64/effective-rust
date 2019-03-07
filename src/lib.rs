@@ -13,12 +13,12 @@ pub use std::pin as pin_reexport;
 pub mod coproduct;
 
 #[macro_export]
-macro_rules! Unhandled {
+macro_rules! Coproduct {
     () => {
         !
     };
     ($head:ty $(,$tail:ty)* $(,)?) => {
-        $crate::coproduct::Either<$head, $crate::Unhandled![$($tail),*]>
+        $crate::coproduct::Either<$head, $crate::Coproduct![$($tail),*]>
     };
 }
 
