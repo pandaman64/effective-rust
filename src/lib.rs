@@ -269,21 +269,21 @@ where
                         }
                     }
                     ActiveComputation::Handler => {
-                        let (ref mut store, ref mut handler) =
+                        let (ref mut sender, ref mut handler) =
                             this.handler_stack.last_mut().unwrap();
                         match Pin::new_unchecked(&mut **handler).resume() {
                             Done(v) => {
                                 this.handler_stack.pop();
                                 match this.handler_stack.last_mut() {
-                                    Some((ref mut store, ref mut _handler)) => {
-                                        store.take().unwrap().set(v);
+                                    Some((ref mut sender, ref mut _handler)) => {
+                                        sender.take().unwrap().set(v);
                                     }
                                     None => return Done(v),
                                 }
                             }
                             Effect(coproduct::Either::A(_resume, s)) => {
-                                assert!(store.is_none());
-                                *store = Some(s);
+                                assert!(sender.is_none());
+                                *sender = Some(s);
                                 this.state = ActiveComputation::Source;
                             }
                             Effect(coproduct::Either::B(e)) => return Effect(e),
@@ -293,8 +293,8 @@ where
                         match Pin::new_unchecked(x).resume() {
                             Done(v) => match this.handler_stack.last_mut() {
                                 None => return Done(v),
-                                Some(&mut (ref mut store, ref mut _handler)) => {
-                                    store.take().unwrap().set(v);
+                                Some(&mut (ref mut sender, ref mut _handler)) => {
+                                    sender.take().unwrap().set(v);
                                     this.state = ActiveComputation::Handler;
                                 }
                             },
