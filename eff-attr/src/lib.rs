@@ -27,7 +27,7 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         let mut ret = TokenStream2::new();
 
         let effects_type_name = quote! {
-            eff::Unhandled![#types]
+            eff::Coproduct![#types]
         };
 
         func.decl.output = syn::parse2(match func.decl.output {

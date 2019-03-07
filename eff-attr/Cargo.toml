@@ -1,6 +1,6 @@
 [package]
 name = "eff-attr"
-version = "0.0.4"
+version = "0.0.5"
 authors = ["pandaman64 <kointosudesuyo@infoseek.jp>"]
 edition = "2018"
 
