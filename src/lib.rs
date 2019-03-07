@@ -12,6 +12,7 @@ pub use std::pin as pin_reexport;
 
 pub mod coproduct;
 
+/// A coproduct type of effects
 #[macro_export]
 macro_rules! Coproduct {
     () => {
@@ -22,6 +23,8 @@ macro_rules! Coproduct {
     };
 }
 
+/// Performs an effect, suspending the current computation until the corresponding handler instruct
+/// it to resume
 #[macro_export]
 macro_rules! perform {
     ($eff:expr) => {{
@@ -31,6 +34,8 @@ macro_rules! perform {
     }};
 }
 
+/// Runs an effectful computation and retrieve the result of it.
+/// When the computation performs an effect, this computation re-perform it as is
 #[macro_export]
 macro_rules! perform_from {
     ($eff:expr) => {{
@@ -56,6 +61,7 @@ pub trait Effect {
     type Output;
 }
 
+/// A special effect that represents the resumption of computation
 pub struct Resume<R>(PhantomCovariantAlwaysSendSync<R>);
 
 impl<R> Effect for Resume<R> {
@@ -72,6 +78,7 @@ pub enum ComputationState<T, Effects> {
 
 /// An effectful computation
 pub trait Effectful<T, Effects> {
+    /// Install an effect handler
     #[inline]
     fn handle<NewEffects, VH, H, VHC, HC, U>(
         self,
@@ -95,6 +102,7 @@ pub trait Effectful<T, Effects> {
         }
     }
 
+    /// Convert this computation into one with broader effects by embedding effects
     #[inline]
     fn embed<Indices>(self) -> EmbedEffect<Self, Effects, Indices>
     where
@@ -103,6 +111,7 @@ pub trait Effectful<T, Effects> {
         EmbedEffect(self, PhantomData)
     }
 
+    /// Boxes this computation so that error messages get shorter
     #[inline]
     fn boxed<'a>(self) -> Boxed<'a, T, Effects>
     where
@@ -111,6 +120,7 @@ pub trait Effectful<T, Effects> {
         Boxed(Box::new(self))
     }
 
+    /// Construct the left variant of Either
     #[inline]
     fn left<R>(self) -> Either<Self, R>
     where
@@ -119,6 +129,7 @@ pub trait Effectful<T, Effects> {
         Either::A(self)
     }
 
+    /// Construct the right variant of Either
     #[inline]
     fn right<L>(self) -> Either<L, Self>
     where
@@ -131,9 +142,11 @@ pub trait Effectful<T, Effects> {
     fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects>;
 }
 
+/// A boxed effectful computation with type erasured
 pub struct Boxed<'a, T, Effects>(Box<dyn Effectful<T, Effects> + 'a>);
 
 impl<'a, T, Effects> Effectful<T, Effects> for Boxed<'a, T, Effects> {
+    #[inline]
     fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects> {
         use std::ops::DerefMut;
         unsafe {
@@ -144,12 +157,14 @@ impl<'a, T, Effects> Effectful<T, Effects> for Boxed<'a, T, Effects> {
     }
 }
 
+/// A lazy computation with no effects
 pub struct Lazy<F>(Option<F>);
 
 impl<T, F> Effectful<T, !> for Lazy<F>
 where
     F: FnOnce() -> T,
 {
+    #[inline]
     fn resume(self: Pin<&mut Self>) -> ComputationState<T, !> {
         // TODO: verify soundness
         unsafe {
@@ -159,6 +174,10 @@ where
     }
 }
 
+/// Convert a thunk into a one-shot effectful computation
+/// This function is usually used to convert closures into an effect handler
+/// (which must be effectful)
+#[inline]
 pub fn lazy<T, F>(v: F) -> impl Effectful<T, !>
 where
     F: FnOnce() -> T,
@@ -166,10 +185,12 @@ where
     Lazy(Some(v))
 }
 
+/// Convert a value into a one-shot effectful computation that immediately resolves to the value
 pub fn pure<T>(v: T) -> impl Effectful<T, !> {
     lazy(move || v)
 }
 
+/// An effectful computation that is either of the two underlying ones
 pub enum Either<L, R> {
     A(L),
     B(R),
@@ -180,6 +201,7 @@ where
     L: Effectful<T, Effects>,
     R: Effectful<T, Effects>,
 {
+    #[inline]
     fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects> {
         use Either::*;
 
@@ -194,6 +216,7 @@ where
     }
 }
 
+/// An effectful computation with broader effects
 pub struct EmbedEffect<C, Smaller, Indices>(C, PhantomCovariantAlwaysSendSync<(Smaller, Indices)>);
 
 impl<C, T, Smaller, Larger, Indices> Effectful<T, Larger> for EmbedEffect<C, Smaller, Indices>
@@ -201,6 +224,7 @@ where
     C: Effectful<T, Smaller>,
     Smaller: coproduct::Embed<Larger, Indices>,
 {
+    #[inline]
     fn resume(self: Pin<&mut Self>) -> ComputationState<T, Larger> {
         use ComputationState::*;
 
@@ -218,6 +242,9 @@ where
     Self: Sized,
     G: Generator<Yield = Effects, Return = T>,
 {
+    /// A generator is treated as an effectful computation,
+    /// where the return value of the generator corresponds to the result of the computation
+    /// and the yielded values to the effects.
     #[inline]
     fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects> {
         use ComputationState::*;
@@ -230,6 +257,7 @@ where
     }
 }
 
+/// An effectful computation with some effects handled
 pub struct Handled<NewEffects, C, T, Effects, VHC, HC, VH, H, U> {
     source: C,
     value_handler: Option<VH>,
@@ -323,6 +351,7 @@ where
     }
 }
 
+/// A pure computation, or computations with no effects
 pub trait Pure<T> {
     fn run(self) -> T;
 }
@@ -331,6 +360,7 @@ impl<C, T> Pure<T> for C
 where
     C: Effectful<T, !>,
 {
+    #[inline]
     fn run(self) -> T {
         use ComputationState::*;
 

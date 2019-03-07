@@ -17,6 +17,7 @@ impl<T> Effect for Wrap<T> {
     type Output = !;
 }
 
+/// Sender is used to supply the computation with the resumption value
 #[derive(Debug)]
 pub struct Sender<E>
 where
@@ -25,6 +26,7 @@ where
     inner: Rc<RefCell<Option<E::Output>>>,
 }
 
+/// Receiver is used to retrive the resumption value
 #[derive(Debug)]
 pub struct Receiver<E>
 where
@@ -33,6 +35,8 @@ where
     inner: Rc<RefCell<Option<E::Output>>>,
 }
 
+/// Create a connected pair of Sender and Receiver
+#[inline]
 pub fn channel<E>() -> (Sender<E>, Receiver<E>)
 where
     E: Effect,
@@ -53,6 +57,10 @@ where
         *self.inner.borrow_mut() = Some(v);
     }
 
+    /// Provide the resumption argument.
+    /// The return value represents a special effect that means the resumption
+    /// of the computation from the handlers.
+    #[inline]
     pub fn continuation<R>(self, v: E::Output) -> Resume<R> {
         self.set(v);
         Resume(PhantomData)
@@ -63,6 +71,8 @@ impl<E> Receiver<E>
 where
     E: Effect,
 {
+    /// Retrieve the resumption argument.
+    #[inline]
     pub fn get(&self) -> E::Output {
         self.inner.borrow_mut().take().unwrap()
     }
@@ -264,6 +274,7 @@ where
         Uninject::uninject(self)
     }
 
+    /// Apply a handler to one of the effect, leaving the other effects intact
     #[inline]
     pub fn on<Func, E, R, Index>(
         self,
@@ -277,6 +288,8 @@ where
         self.uninject().map(|(e, sender)| f(e, sender))
     }
 
+    // TODO: generalize
+    /// Apply two handlers to corresponding effect types, leaving the other effects intact
     #[inline]
     pub fn on2<R, Func1, E1, Index1, Func2, E2, Index2>(
         self,
