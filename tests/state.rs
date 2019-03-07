@@ -53,12 +53,12 @@ fn test_state() {
                 |x| eff::pure(x).embed(),
                 |e| {
                     match e.uninject() {
-                        Ok((GetState(_), store)) => Ok(eff::Either::A(static move || {
-                            eff::perform!(store.set(state_ref.get()))
+                        Ok((GetState(_), k)) => Ok(eff::Either::A(static move || {
+                            eff::perform!(k.continuation(state_ref.get()))
                         })),
                         Err(e) => match e.uninject() {
-                            Ok((SetState(x), store)) => Ok(eff::Either::B(static move || {
-                                eff::perform!(store.set(state_ref.set(x)))
+                            Ok((SetState(x), k)) => Ok(eff::Either::B(static move || {
+                                eff::perform!(k.continuation(state_ref.set(x)))
                             })),
                             Err(_) => unreachable!(),
                         },

@@ -25,9 +25,9 @@ macro_rules! Unhandled {
 #[macro_export]
 macro_rules! perform {
     ($eff:expr) => {{
-        let store = $crate::coproduct::Store::default();
-        yield $crate::coproduct::Inject::inject($eff, store.clone());
-        store.get()
+        let (sender, receiver) = $crate::coproduct::channel();
+        yield $crate::coproduct::Inject::inject($eff, sender);
+        receiver.get()
     }};
 }
 
@@ -38,8 +38,8 @@ macro_rules! perform_from {
             eff => {
                 $crate::pin_mut!(eff);
                 loop {
-                    let with_effect = $crate::pin_reexport::Pin::as_mut(&mut eff);
-                    match $crate::Effectful::resume(with_effect) {
+                    let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
+                    match $crate::Effectful::resume(eff) {
                         $crate::ComputationState::Done(x) => break x,
                         $crate::ComputationState::Effect(e) => {
                             yield $crate::coproduct::Embed::embed(e)
@@ -71,10 +71,7 @@ pub enum ComputationState<T, Effects> {
 }
 
 /// An effectful computation
-pub trait Effectful<T, Effects>
-where
-    Self: Sized,
-{
+pub trait Effectful<T, Effects> {
     #[inline]
     fn handle<NewEffects, VH, H, VHC, HC, U>(
         self,
@@ -82,6 +79,7 @@ where
         handler: H,
     ) -> Handled<NewEffects, Self, T, Effects, VHC, HC, VH, H, U>
     where
+        Self: Sized,
         VH: FnOnce(T) -> VHC,
         H: FnMut(Effects) -> Result<HC, NewEffects>,
         VHC: Effectful<U, NewEffects>,
@@ -98,12 +96,36 @@ where
     }
 
     #[inline]
-    fn embed<Indices>(self) -> EmbedEffect<Self, Effects, Indices> {
+    fn embed<Indices>(self) -> EmbedEffect<Self, Effects, Indices>
+    where
+        Self: Sized,
+    {
         EmbedEffect(self, PhantomData)
+    }
+
+    #[inline]
+    fn boxed<'a>(self) -> Boxed<'a, T, Effects>
+    where
+        Self: Sized + 'a,
+    {
+        Boxed(Box::new(self))
     }
 
     /// Resume the execution of this expression
     fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects>;
+}
+
+pub struct Boxed<'a, T, Effects>(Box<dyn Effectful<T, Effects> + 'a>);
+
+impl<'a, T, Effects> Effectful<T, Effects> for Boxed<'a, T, Effects> {
+    fn resume(self: Pin<&mut Self>) -> ComputationState<T, Effects> {
+        use std::ops::DerefMut;
+        unsafe {
+            let this = self.get_unchecked_mut();
+            let r = this.0.deref_mut();
+            Pin::new_unchecked(r).resume()
+        }
+    }
 }
 
 pub struct Lazy<F>(Option<F>);
@@ -196,7 +218,7 @@ pub struct Handled<NewEffects, C, T, Effects, VHC, HC, VH, H, U> {
     source: C,
     value_handler: Option<VH>,
     handler: H,
-    handler_stack: Vec<(Option<coproduct::Store<Resume<U>>>, Box<HC>)>,
+    handler_stack: Vec<(Option<coproduct::Sender<Resume<U>>>, Box<HC>)>,
     state: ActiveComputation<VHC>,
     phantom: PhantomCovariantAlwaysSendSync<(T, Effects, NewEffects)>,
 }
@@ -254,7 +276,7 @@ where
                                 this.handler_stack.pop();
                                 match this.handler_stack.last_mut() {
                                     Some((ref mut store, ref mut _handler)) => {
-                                        store.take().unwrap().set::<!>(v);
+                                        store.take().unwrap().set(v);
                                     }
                                     None => return Done(v),
                                 }
@@ -272,7 +294,7 @@ where
                             Done(v) => match this.handler_stack.last_mut() {
                                 None => return Done(v),
                                 Some(&mut (ref mut store, ref mut _handler)) => {
-                                    store.take().unwrap().set::<!>(v);
+                                    store.take().unwrap().set(v);
                                     this.state = ActiveComputation::Handler;
                                 }
                             },

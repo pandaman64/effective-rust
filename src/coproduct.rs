@@ -17,50 +17,54 @@ impl<T> Effect for Wrap<T> {
     type Output = !;
 }
 
-/// A location to save the output of an effect
-/// We can avoid the dynamic allocation of `Rc` once
-/// Rust supports "streaming generators" or we use some unsafe code.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Store<E>
+#[derive(Debug)]
+pub struct Sender<E>
 where
     E: Effect,
 {
     inner: Rc<RefCell<Option<E::Output>>>,
 }
 
-impl<E> std::default::Default for Store<E>
+#[derive(Debug)]
+pub struct Receiver<E>
 where
     E: Effect,
 {
-    fn default() -> Self {
-        Store {
-            inner: Default::default(),
-        }
-    }
+    inner: Rc<RefCell<Option<E::Output>>>,
 }
 
-impl<E> Clone for Store<E>
+pub fn channel<E>() -> (Sender<E>, Receiver<E>)
 where
     E: Effect,
 {
-    fn clone(&self) -> Self {
-        Store {
-            inner: Rc::clone(&self.inner),
-        }
+    let inner = Default::default();
+    let sender = Sender {
+        inner: Rc::clone(&inner),
+    };
+    let receiver = Receiver { inner };
+    (sender, receiver)
+}
+
+impl<E> Sender<E>
+where
+    E: Effect,
+{
+    pub(crate) fn set(self, v: E::Output) {
+        *self.inner.borrow_mut() = Some(v);
+    }
+
+    pub fn continuation<R>(self, v: E::Output) -> Resume<R> {
+        self.set(v);
+        Resume(PhantomData)
     }
 }
 
-impl<E> Store<E>
+impl<E> Receiver<E>
 where
     E: Effect,
 {
     pub fn get(&self) -> E::Output {
         self.inner.borrow_mut().take().unwrap()
-    }
-
-    pub fn set<R>(self, v: E::Output) -> Resume<R> {
-        *self.inner.borrow_mut() = Some(v);
-        Resume(PhantomData)
     }
 }
 
@@ -69,7 +73,7 @@ pub enum Either<E, Rest>
 where
     E: Effect,
 {
-    A(E, Store<E>),
+    A(E, Sender<E>),
     B(Rest),
 }
 
@@ -81,7 +85,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Either::A(effect, store) => write!(f, "({:?}, {:?})", effect, store),
+            Either::A(effect, sender) => write!(f, "({:?}, {:?})", effect, sender),
             Either::B(rest) => write!(f, "{:?}", rest),
         }
     }
@@ -92,8 +96,8 @@ pub trait Inject<E, Index>
 where
     E: Effect,
 {
-    /// Construct `Self` using an effect and a store
-    fn inject(effect: E, store: Store<E>) -> Self;
+    /// Construct `Self` using an effect and a sender
+    fn inject(effect: E, sender: Sender<E>) -> Self;
 }
 
 impl<E, Rest> Inject<E, Zero> for Either<E, Rest>
@@ -101,8 +105,8 @@ where
     E: Effect,
 {
     #[inline]
-    fn inject(effect: E, store: Store<E>) -> Self {
-        Either::A(effect, store)
+    fn inject(effect: E, sender: Sender<E>) -> Self {
+        Either::A(effect, sender)
     }
 }
 
@@ -113,8 +117,8 @@ where
     Rest: Inject<E, Index>,
 {
     #[inline]
-    fn inject(effect: E, store: Store<E>) -> Self {
-        Either::B(Rest::inject(effect, store))
+    fn inject(effect: E, sender: Sender<E>) -> Self {
+        Either::B(Rest::inject(effect, sender))
     }
 }
 
@@ -126,11 +130,11 @@ where
     /// The other effect types of this coproduct
     type Remainder;
 
-    /// Retrieve an effect and a store from self if the type matches
+    /// Retrieve an effect and a sender from self if the type matches
     ///
     /// # Errors
     /// If self holds an effect of a different type, this method returns an error.
-    fn uninject(self) -> Result<(E, Store<E>), Self::Remainder>;
+    fn uninject(self) -> Result<(E, Sender<E>), Self::Remainder>;
 }
 
 impl<E, Rest> Uninject<E, Zero> for Either<E, Rest>
@@ -140,9 +144,9 @@ where
     type Remainder = Rest;
 
     #[inline]
-    fn uninject(self) -> Result<(E, Store<E>), Self::Remainder> {
+    fn uninject(self) -> Result<(E, Sender<E>), Self::Remainder> {
         match self {
-            Either::A(effect, store) => Ok((effect, store)),
+            Either::A(effect, sender) => Ok((effect, sender)),
             Either::B(rest) => Err(rest),
         }
     }
@@ -157,9 +161,9 @@ where
     type Remainder = Either<F, <Rest as Uninject<E, Index>>::Remainder>;
 
     #[inline]
-    fn uninject(self) -> Result<(E, Store<E>), Self::Remainder> {
+    fn uninject(self) -> Result<(E, Sender<E>), Self::Remainder> {
         match self {
-            Either::A(effect, store) => Err(Either::A(effect, store)),
+            Either::A(effect, sender) => Err(Either::A(effect, sender)),
             Either::B(rest) => Rest::uninject(rest).map_err(Either::B),
         }
     }
@@ -188,7 +192,7 @@ where
     #[inline]
     fn embed(self) -> Target {
         match self {
-            Either::A(effect, store) => Target::inject(effect, store),
+            Either::A(effect, sender) => Target::inject(effect, sender),
             Either::B(rest) => rest.embed(),
         }
     }
@@ -225,42 +229,34 @@ where
     #[inline]
     fn subset(self) -> Result<Either<E, Rest>, Self::Remainder> {
         match self.uninject() {
-            Ok((effect, store)) => Ok(Either::A(effect, store)),
+            Ok((effect, sender)) => Ok(Either::A(effect, sender)),
             Err(rem) => rem.subset().map(Either::B),
         }
     }
-}
-
-#[test]
-fn test_subset() {
-    let x: super::Unhandled![Wrap<u32>, Wrap<i64>] =
-        Inject::inject(Wrap(42_u32), Default::default());
-    let y: Result<super::Unhandled![Wrap<u32>], _> = x.subset();
-    assert!(y.is_ok());
 }
 
 impl<F, Rest> Either<F, Rest>
 where
     F: Effect,
 {
-    /// Construct `Self` using an effect and a store
+    /// Construct `Self` using an effect and a sender
     #[inline]
-    pub fn inject<E, Index>(effect: E, store: Store<E>) -> Self
+    pub fn inject<E, Index>(effect: E, sender: Sender<E>) -> Self
     where
         E: Effect,
         Self: Inject<E, Index>,
     {
-        Inject::inject(effect, store)
+        Inject::inject(effect, sender)
     }
 
-    /// Retrieve an effect and a store from self if the type matches
+    /// Retrieve an effect and a sender from self if the type matches
     ///
     /// # Errors
     /// If self holds an effect of a different type, this method returns an error.
     #[inline]
     pub fn uninject<E, Index>(
         self,
-    ) -> Result<(E, Store<E>), <Self as Uninject<E, Index>>::Remainder>
+    ) -> Result<(E, Sender<E>), <Self as Uninject<E, Index>>::Remainder>
     where
         E: Effect,
         Self: Uninject<E, Index>,
@@ -274,11 +270,11 @@ where
         f: Func,
     ) -> Result<R, <Self as Uninject<E, Index>>::Remainder>
     where
-        Func: FnOnce(E, Store<E>) -> R,
+        Func: FnOnce(E, Sender<E>) -> R,
         E: Effect,
         Self: Uninject<E, Index>,
     {
-        self.uninject().map(|(e, store)| f(e, store))
+        self.uninject().map(|(e, sender)| f(e, sender))
     }
 
     /// Embed self into the target type

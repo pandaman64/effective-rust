@@ -40,10 +40,10 @@ fn test_example() {
         .handle(
             |x| eff::pure(x).embed(),
             |e| {
-                e.on(|Foo(x), store| {
+                e.on(|Foo(x), k| {
                     static move || {
                         println!("foo");
-                        perform!(store.set(x + 1))
+                        perform!(k.continuation(x + 1))
                     }
                 })
             },
@@ -51,10 +51,10 @@ fn test_example() {
         .handle(
             |x| eff::pure(x).embed(),
             |e| {
-                e.on(|Bar, store| {
+                e.on(|Bar, k| {
                     static move || {
                         println!("bar");
-                        perform!(store.set("Hello, World!".into()))
+                        perform!(k.continuation("Hello, World!".into()))
                     }
                 })
             },
@@ -62,7 +62,7 @@ fn test_example() {
         .handle(
             |x| eff::pure(x).embed(),
             |e| {
-                e.on(|effects::Baz, _store| {
+                e.on(|effects::Baz, _k| {
                     eff::lazy(|| {
                         println!("baz");
                         'x'

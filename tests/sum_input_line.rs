@@ -27,10 +27,10 @@ fn sum_up(s: &str) -> usize {
     e.handle(
         |x| pure(x).embed(),
         |e| {
-            e.on(|ConversionError(x), store| {
+            e.on(|ConversionError(x), k| {
                 static move || {
                     println!("conversion error: {:?}", x);
-                    perform!(store.set(0))
+                    perform!(k.continuation(0))
                 }
             })
         },

@@ -31,9 +31,9 @@ fn test_attr() {
     e.handle(
         |()| eff::pure(println!("done 1")).embed(),
         |e| {
-            e.on(|Eff, store| {
+            e.on(|Eff, k| {
                 static move || {
-                    eff::perform!(store.set(println!("eff")));
+                    eff::perform!(k.continuation(println!("eff")));
                 }
             })
         },
@@ -41,9 +41,9 @@ fn test_attr() {
     .handle(
         |()| eff::pure(println!("done 2")),
         |e| {
-            e.on(|hoge::Hoge, store| {
+            e.on(|hoge::Hoge, k| {
                 static move || {
-                    eff::perform!(store.set(println!("hoge")));
+                    eff::perform!(k.continuation(println!("hoge")));
                 }
             })
         },

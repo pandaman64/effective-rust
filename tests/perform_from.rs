@@ -35,10 +35,10 @@ fn test_perform_from() {
         e.handle(
             |x| pure(x).embed(),
             |e| {
-                e.on(|Foo, store| {
+                e.on(|Foo, k| {
                     static move || {
                         println!("foo");
-                        perform!(store.set(42))
+                        perform!(k.continuation(42))
                     }
                 })
             }
@@ -46,10 +46,10 @@ fn test_perform_from() {
         .handle(
             |x| pure(x).embed(),
             |e| {
-                e.on(|Bar(x), store| {
+                e.on(|Bar(x), k| {
                     static move || {
                         println!("Bar({})", x);
-                        perform!(store.set(x + 2))
+                        perform!(k.continuation(x + 2))
                     }
                 })
             }

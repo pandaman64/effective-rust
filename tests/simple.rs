@@ -19,7 +19,7 @@ fn test_simple() {
     assert_eq!(
         e.handle(
             |x| eff::pure(x).embed(),
-            |e| { e.on(|Eff, store| static move || perform!(store.set("Hello".into()))) }
+            |e| { e.on(|Eff, k| static move || perform!(k.continuation("Hello".into()))) }
         )
         .run(),
         "Hello"
