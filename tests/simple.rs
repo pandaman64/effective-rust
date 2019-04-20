@@ -8,6 +8,7 @@ impl Effect for Eff {
     type Output = String;
 }
 
+/*
 #[test]
 fn test_simple() {
     #[eff(Eff)]
@@ -24,4 +25,26 @@ fn test_simple() {
         .run(),
         "Hello"
     );
+}*/
+
+#[test]
+fn test_raw() {
+    let effectful = from_generator(static move || {
+        yield <Coproduct![Eff]>::inject(Eff);
+        get_key(|key| key.get::<String>())
+    });
+    let result = effectful.handle(
+        |x| pure(x).embed(),
+        |_e| {
+            Ok(from_generator(static move || {
+                get_key(|key| {
+                    key.set::<String>("Hello".into());
+                });
+                yield <Coproduct![Continue<String>]>::inject(Continue::new());
+                let result = get_key(|key| key.get::<String>());
+                format!("{} World!", result)
+            }))
+        },
+    );
+    assert_eq!(result.block_on(), "Hello World!");
 }
