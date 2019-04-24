@@ -1,4 +1,11 @@
-#![feature(nll, generators, generator_trait, never_type, core_intrinsics)]
+#![feature(
+    nll,
+    generators,
+    generator_trait,
+    never_type,
+    core_intrinsics,
+    extern_types
+)]
 
 use std::cell::Cell;
 use std::intrinsics::type_name;
@@ -87,8 +94,12 @@ pub enum ComputationState<T, Effect> {
     NotReady,
 }
 
+extern "Rust" {
+    type Whatever;
+}
+
 pub struct LocalKey {
-    storage: Cell<Option<NonNull<()>>>,
+    storage: Cell<Option<NonNull<Whatever>>>,
 }
 
 impl LocalKey {
@@ -114,7 +125,7 @@ impl LocalKey {
         unsafe {
             println!("LocalKey::set: {}", type_name::<T>());
             self.storage.set(Some(NonNull::new_unchecked(
-                Box::into_raw(Box::new(v)) as *mut ()
+                Box::into_raw(Box::new(v)) as *mut Whatever
             )));
         }
     }
