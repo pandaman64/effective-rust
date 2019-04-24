@@ -32,10 +32,10 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         func.decl.output = syn::parse2(match func.decl.output {
             syn::ReturnType::Default => quote! {
-                -> impl std::ops::Generator<Yield = #effects_type_name, Return = ()>
+                -> impl eff::Effectful<Output = (), Effect = #effects_type_name>
             },
             syn::ReturnType::Type(arrow, ty) => quote! {
-                #arrow impl std::ops::Generator<Yield = #effects_type_name, Return = #ty>
+                #arrow impl eff::Effectful<Output = #ty, Effect = #effects_type_name>
             },
         })
         .unwrap();
@@ -43,13 +43,13 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         let original_block = func.block;
         func.block = syn::parse2(quote! {
             {
-                static move || {
+                eff::from_generator(static move || {
                     if false {
                         yield unreachable!();
                     }
 
                     #original_block
-                }
+                })
             }
         })
         .unwrap();
