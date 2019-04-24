@@ -19,16 +19,16 @@ fn test_simple() {
     assert_eq!(
         e.handle(
             |x| eff::pure(x).embed(),
-            |_e| {
-                Ok(from_generator(static move || {
-                    get_key(|key| {
-                        key.set::<String>("Hello".into());
-                    });
-                    yield Suspension::Effect(<Coproduct![Continue<String>]>::inject(
-                        Continue::new(),
-                    ));
-                    get_key(|key| key.get::<String>())
-                }))
+            |e| {
+                e.on(|Eff, key| {
+                    effectful! {
+                        key.wake("Hello".into());
+                        perform!(key.continuation())
+
+                        // or
+                        // perform!(key.resume("Hello".into()))
+                    }
+                })
             }
         )
         .block_on(),
