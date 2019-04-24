@@ -36,9 +36,13 @@ macro_rules! Coproduct {
 #[macro_export]
 macro_rules! perform {
     ($eff:expr) => {{
-        let (sender, receiver) = $crate::coproduct::channel();
-        yield $crate::coproduct::Inject::inject($eff, sender);
-        receiver.get()
+        match $eff {
+            eff => {
+                let getter = $crate::gen_getter(&eff);
+                yield $crate::Suspension::Effect($crate::coproduct::Inject::inject(eff));
+                $crate::get_key(getter)
+            }
+        }
     }};
 }
 
@@ -55,7 +59,10 @@ macro_rules! perform_from {
                     match $crate::Effectful::resume(eff) {
                         $crate::ComputationState::Done(x) => break x,
                         $crate::ComputationState::Effect(e) => {
-                            yield $crate::coproduct::Embed::embed(e)
+                            yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
+                        }
+                        $crate::ComputationState::NotReady => {
+                            yield $crate::Suspension::NotReady;
                         }
                     }
                 }
@@ -94,6 +101,11 @@ pub enum ComputationState<T, Effect> {
     NotReady,
 }
 
+pub enum Suspension<Effect> {
+    Effect(Effect),
+    NotReady,
+}
+
 extern "Rust" {
     type Whatever;
 }
@@ -129,6 +141,13 @@ impl LocalKey {
             )));
         }
     }
+}
+
+pub fn gen_getter<E>(_e: &E) -> fn(&LocalKey) -> E::Output
+where
+    E: Effect,
+{
+    LocalKey::get::<E::Output>
 }
 
 /// An effectful computation
@@ -342,14 +361,14 @@ pub struct GenEffectful<G>(G);
 
 pub fn from_generator<G, Output, Effect>(x: G) -> impl Effectful<Output = Output, Effect = Effect>
 where
-    G: Generator<Return = Output, Yield = Effect>,
+    G: Generator<Return = Output, Yield = Suspension<Effect>>,
 {
     GenEffectful(x)
 }
 
 impl<G, Output, Effect> Effectful for GenEffectful<G>
 where
-    G: Generator<Return = Output, Yield = Effect>,
+    G: Generator<Return = Output, Yield = Suspension<Effect>>,
 {
     type Output = Output;
     type Effect = Effect;
@@ -369,7 +388,8 @@ where
             let this = &mut self.get_unchecked_mut().0;
             set_key(key, || match Pin::new_unchecked(this).resume() {
                 Complete(v) => Done(v),
-                Yielded(e) => Effect(e),
+                Yielded(Suspension::Effect(e)) => Effect(e),
+                Yielded(Suspension::NotReady) => NotReady,
             })
         }
     }

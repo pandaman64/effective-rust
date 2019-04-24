@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait, never_type)]
+#![feature(generators, generator_trait, never_type, impl_trait_in_bindings)]
 
 use eff::*;
 
@@ -8,7 +8,6 @@ impl Effect for Eff {
     type Output = String;
 }
 
-/*
 #[test]
 fn test_simple() {
     #[eff(Eff)]
@@ -20,31 +19,19 @@ fn test_simple() {
     assert_eq!(
         e.handle(
             |x| eff::pure(x).embed(),
-            |e| { e.on(|Eff, k| static move || perform!(k.continuation("Hello".into()))) }
+            |_e| {
+                Ok(from_generator(static move || {
+                    get_key(|key| {
+                        key.set::<String>("Hello".into());
+                    });
+                    yield Suspension::Effect(<Coproduct![Continue<String>]>::inject(
+                        Continue::new(),
+                    ));
+                    get_key(|key| key.get::<String>())
+                }))
+            }
         )
-        .run(),
+        .block_on(),
         "Hello"
     );
-}*/
-
-#[test]
-fn test_raw() {
-    let effectful = from_generator(static move || {
-        yield <Coproduct![Eff]>::inject(Eff);
-        get_key(|key| key.get::<String>())
-    });
-    let result = effectful.handle(
-        |x| pure(x).embed(),
-        |_e| {
-            Ok(from_generator(static move || {
-                get_key(|key| {
-                    key.set::<String>("Hello".into());
-                });
-                yield <Coproduct![Continue<String>]>::inject(Continue::new());
-                let result = get_key(|key| key.get::<String>());
-                format!("{} World!", result)
-            }))
-        },
-    );
-    assert_eq!(result.block_on(), "Hello World!");
 }
