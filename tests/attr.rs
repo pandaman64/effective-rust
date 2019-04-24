@@ -25,15 +25,15 @@ fn foo() {
 
 #[test]
 fn test_attr() {
-    use eff::{Effectful, Pure};
+    use eff::{effectful, Effectful};
 
     let e = foo();
     e.handle(
         |()| eff::pure(println!("done 1")).embed(),
         |e| {
             e.on(|Eff, k| {
-                static move || {
-                    eff::perform!(k.continuation(println!("eff")));
+                effectful! {
+                    eff::perform!(k.resume(println!("eff")));
                 }
             })
         },
@@ -42,11 +42,11 @@ fn test_attr() {
         |()| eff::pure(println!("done 2")),
         |e| {
             e.on(|hoge::Hoge, k| {
-                static move || {
-                    eff::perform!(k.continuation(println!("hoge")));
+                effectful! {
+                    eff::perform!(k.resume(println!("hoge")));
                 }
             })
         },
     )
-    .run();
+    .block_on();
 }

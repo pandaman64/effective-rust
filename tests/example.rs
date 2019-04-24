@@ -41,9 +41,9 @@ fn test_example() {
             |x| eff::pure(x).embed(),
             |e| {
                 e.on(|Foo(x), k| {
-                    static move || {
+                    effectful! {
                         println!("foo");
-                        perform!(k.continuation(x + 1))
+                        perform!(k.resume(x + 1))
                     }
                 })
             },
@@ -52,9 +52,9 @@ fn test_example() {
             |x| eff::pure(x).embed(),
             |e| {
                 e.on(|Bar, k| {
-                    static move || {
+                    effectful! {
                         println!("bar");
-                        perform!(k.continuation("Hello, World!".into()))
+                        perform!(k.resume("Hello, World!".into()))
                     }
                 })
             },
@@ -71,7 +71,7 @@ fn test_example() {
                 })
             },
         )
-        .run();
+        .block_on();
 
     assert_eq!(result, "Hello, World!".chars().nth(7).unwrap());
 }

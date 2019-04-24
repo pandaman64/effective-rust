@@ -28,14 +28,14 @@ fn sum_up(s: &str) -> usize {
         |x| pure(x).embed(),
         |e| {
             e.on(|ConversionError(x), k| {
-                static move || {
+                effectful! {
                     println!("conversion error: {:?}", x);
-                    perform!(k.continuation(0))
+                    perform!(k.resume(0))
                 }
             })
         },
     )
-    .run()
+    .block_on()
 }
 
 #[test]

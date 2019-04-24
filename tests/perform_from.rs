@@ -36,9 +36,9 @@ fn test_perform_from() {
             |x| pure(x).embed(),
             |e| {
                 e.on(|Foo, k| {
-                    static move || {
+                    effectful! {
                         println!("foo");
-                        perform!(k.continuation(42))
+                        perform!(k.resume(42))
                     }
                 })
             }
@@ -47,14 +47,14 @@ fn test_perform_from() {
             |x| pure(x).embed(),
             |e| {
                 e.on(|Bar(x), k| {
-                    static move || {
+                    effectful! {
                         println!("Bar({})", x);
-                        perform!(k.continuation(x + 2))
+                        perform!(k.resume(x + 2))
                     }
                 })
             }
         )
-        .run(),
+        .block_on(),
         44
     );
 }

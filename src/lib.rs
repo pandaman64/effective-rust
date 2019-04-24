@@ -7,6 +7,7 @@
     extern_types
 )]
 
+use log::debug;
 use std::cell::Cell;
 use std::intrinsics::type_name;
 use std::marker::PhantomData;
@@ -59,9 +60,10 @@ macro_rules! perform_from {
         match $eff {
             eff => {
                 $crate::pin_mut!(eff);
+                let key = $crate::get_key();
                 loop {
                     let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
-                    match $crate::Effectful::resume(eff) {
+                    match $crate::Effectful::resume(eff, std::rc::Rc::clone(&key)) {
                         $crate::ComputationState::Done(x) => break x,
                         $crate::ComputationState::Effect(e) => {
                             yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
@@ -90,7 +92,7 @@ pub trait Effect {
     type Output;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Continue<R>(PhantomData<R>);
 
 impl<R> Effect for Continue<R> {
@@ -98,9 +100,7 @@ impl<R> Effect for Continue<R> {
 }
 
 impl<R> Continue<R> {
-    // this should not be called more than once
-    // TODO: type system should enforce this
-    pub fn new() -> Self {
+    fn new() -> Self {
         Continue(PhantomData)
     }
 }
@@ -125,6 +125,7 @@ extern "Rust" {
     type Whatever;
 }
 
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct LocalKey {
     storage: Cell<Option<NonNull<Whatever>>>,
@@ -137,9 +138,17 @@ impl LocalKey {
         }
     }
 
+    pub fn contains(&self) -> bool {
+        self.storage.get().is_some()
+    }
+
     pub fn get<T>(&self) -> T {
         unsafe {
-            println!("LocalKey::get: {}", type_name::<T>());
+            debug!(
+                "LocalKey::get: {}, from {:?}",
+                type_name::<T>(),
+                self.storage.get()
+            );
             *(Box::from_raw(
                 self.storage
                     .replace(None)
@@ -151,7 +160,7 @@ impl LocalKey {
 
     pub fn set<T>(&self, v: T) {
         unsafe {
-            println!("LocalKey::set: {}", type_name::<T>());
+            debug!("LocalKey::set: {}", type_name::<T>());
             self.storage.set(Some(NonNull::new_unchecked(
                 Box::into_raw(Box::new(v)) as *mut Whatever
             )));
@@ -173,36 +182,25 @@ pub struct TypedKey<E: Effect> {
 }
 
 impl<E: Effect> TypedKey<E> {
-    /*pub fn get(&self) -> E::Output {
-        unsafe {
-            println!("TypedKey::get: {}", type_name::<E>());
-            *(Box::from_raw(
-                self.storage
-                    .replace(None)
-                    .expect("argument must be set")
-                    .as_ptr() as *mut E::Output,
-            ))
-        }
-    }*/
-
     pub fn wake(&self, v: E::Output) {
         unsafe {
-            println!(
-                "TypedKey::set: {} -> {}",
+            debug!(
+                "TypedKey::set: {} -> {}, to: {:?}",
                 type_name::<E>(),
-                type_name::<E::Output>()
+                type_name::<E::Output>(),
+                self.storage.get(),
             );
-            self.storage.set(Some(NonNull::new_unchecked(
+            self.storage.set(dbg!(Some(NonNull::new_unchecked(
                 Box::into_raw(Box::new(v)) as *mut E::Output
-            )));
+            ))));
         }
     }
 
-    pub fn continuation(self) -> Continue<E::Output> {
+    pub fn continuation<R>(self) -> Continue<R> {
         Continue::new()
     }
 
-    pub fn resume(self, v: E::Output) -> Continue<E::Output> {
+    pub fn resume<R>(self, v: E::Output) -> Continue<R> {
         self.wake(v);
         self.continuation()
     }
@@ -255,6 +253,30 @@ pub trait Effectful {
     }
 
     #[inline]
+    fn left<R>(self) -> Either<Self, R>
+    where
+        Self: Sized,
+    {
+        Either::A(self)
+    }
+
+    #[inline]
+    fn right<L>(self) -> Either<L, Self>
+    where
+        Self: Sized,
+    {
+        Either::B(self)
+    }
+
+    #[inline]
+    fn boxed<'a>(self) -> Boxed<'a, Self::Output, Self::Effect>
+    where
+        Self: Sized + 'a,
+    {
+        Boxed(Box::new(self))
+    }
+
+    #[inline]
     fn block_on(self) -> Self::Output
     where
         Self: Sized + Effectful<Effect = !>,
@@ -270,7 +292,7 @@ pub trait Effectful {
             match this.as_mut().resume(Rc::clone(&local_key)) {
                 Done(v) => return v,
                 Effect(e) => e, // unreachable
-                NotReady => {}  // TODO: correct?
+                NotReady => unimplemented!("current thread must be parked until wake()"),
             }
         }
     }
@@ -423,9 +445,14 @@ where
 }
 
 pub fn get_key() -> Rc<LocalKey> {
-    TLS_KEY
-        .with(|tls_key| tls_key.replace(None).take())
-        .expect("local key must be set")
+    let key = TLS_KEY
+        .with(|tls_key| {
+            let key = tls_key.replace(None).take();
+            tls_key.set(key.clone());
+            key
+        })
+        .expect("local key must be set");
+    key
 }
 
 pub struct GenEffectful<G>(G);
@@ -510,12 +537,18 @@ where
                     ActiveComputation::Source => {
                         match Pin::new_unchecked(&mut this.source).resume(Rc::clone(&key)) {
                             Done(v) => {
-                                this.state = ActiveComputation::ValueHandler(this
-                                    .value_handler
-                                    .take()
-                                    .expect("resume after completion")(
-                                    v
-                                ));
+                                if this.handler_stack.is_empty() {
+                                    this.state = ActiveComputation::ValueHandler(this
+                                        .value_handler
+                                        .take()
+                                        .expect("resume after completion")(
+                                        v
+                                    ));
+                                } else {
+                                    // fulfill Continue<Output> effect
+                                    this.state = ActiveComputation::Handler;
+                                    key.set(v);
+                                }
                             }
                             Effect(e) => match (this.handler)(e) {
                                 Ok(x) => {
@@ -540,7 +573,16 @@ where
                                     key.set(v);
                                 }
                             }
-                            Effect(coproduct::Either::A(_, _)) => return NotReady,
+                            Effect(coproduct::Either::A(_, _)) => {
+                                // continue the original computation
+                                this.state = ActiveComputation::Source;
+
+                                // if the handler has already waken the task, continue the computation
+                                // otherwise, wait until wake() is called
+                                if !key.contains() {
+                                    return NotReady;
+                                }
+                            }
                             Effect(coproduct::Either::B(e)) => return Effect(e),
                             NotReady => return NotReady, // TODO: correct?
                         }

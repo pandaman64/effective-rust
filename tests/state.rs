@@ -42,7 +42,7 @@ fn do_something() -> String {
 
 #[test]
 fn test_state() {
-    use eff::{Effectful, Pure};
+    use eff::{effectful, Effectful};
     use std::cell::Cell;
 
     let state = Cell::new(10);
@@ -54,15 +54,15 @@ fn test_state() {
                 |e| {
                     e.on2(
                         |GetState(_), k| {
-                            (static move || eff::perform!(k.continuation(state_ref.get()))).left()
+                            (effectful! { eff::perform!(k.resume(state_ref.get())) }).left()
                         },
                         |SetState(x), k| {
-                            (static move || eff::perform!(k.continuation(state_ref.set(x)))).right()
+                            (effectful! { eff::perform!(k.resume(state_ref.set(x))) }).right()
                         },
                     )
                 }
             )
-            .run(),
+            .block_on(),
         "10\n11\n22"
     );
     assert_eq!(state.into_inner(), 23);

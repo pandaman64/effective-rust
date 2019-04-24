@@ -14,6 +14,7 @@ eff-attr = "0.0.6"
 proc-macro-hack = "0.5.4"
 rich-phantoms = "0.1.0"
 pin-utils = "0.1.0-alpha.4"
+log = "0.4.6"
 
 [workspace]
 members = [
