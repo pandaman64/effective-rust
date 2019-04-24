@@ -1,5 +1,4 @@
 use super::{Effect, TypedKey};
-use std::rc::Rc;
 
 use rich_phantoms::PhantomCovariantAlwaysSendSync;
 
@@ -18,7 +17,7 @@ pub enum Either<E, Rest>
 where
     E: Effect,
 {
-    A(E, Rc<TypedKey<E>>),
+    A(E, TypedKey<E>),
     B(Rest),
 }
 
@@ -27,7 +26,7 @@ pub trait Inject<E, Index>
 where
     E: Effect,
 {
-    fn inject(effect: E, key: Rc<TypedKey<E>>) -> Self;
+    fn inject(effect: E, key: TypedKey<E>) -> Self;
 }
 
 impl<E, Rest> Inject<E, Zero> for Either<E, Rest>
@@ -35,7 +34,7 @@ where
     E: Effect,
 {
     #[inline]
-    fn inject(effect: E, key: Rc<TypedKey<E>>) -> Self {
+    fn inject(effect: E, key: TypedKey<E>) -> Self {
         Either::A(effect, key)
     }
 }
@@ -47,7 +46,7 @@ where
     Rest: Inject<E, Index>,
 {
     #[inline]
-    fn inject(effect: E, key: Rc<TypedKey<E>>) -> Self {
+    fn inject(effect: E, key: TypedKey<E>) -> Self {
         Either::B(Rest::inject(effect, key))
     }
 }
@@ -64,7 +63,7 @@ where
     ///
     /// # Errors
     /// If self holds an effect of a different type, this method returns an error.
-    fn uninject(self) -> Result<(E, Rc<TypedKey<E>>), Self::Remainder>;
+    fn uninject(self) -> Result<(E, TypedKey<E>), Self::Remainder>;
 }
 
 impl<E, Rest> Uninject<E, Zero> for Either<E, Rest>
@@ -74,7 +73,7 @@ where
     type Remainder = Rest;
 
     #[inline]
-    fn uninject(self) -> Result<(E, Rc<TypedKey<E>>), Self::Remainder> {
+    fn uninject(self) -> Result<(E, TypedKey<E>), Self::Remainder> {
         match self {
             Either::A(effect, key) => Ok((effect, key)),
             Either::B(rest) => Err(rest),
@@ -91,7 +90,7 @@ where
     type Remainder = Either<F, <Rest as Uninject<E, Index>>::Remainder>;
 
     #[inline]
-    fn uninject(self) -> Result<(E, Rc<TypedKey<E>>), Self::Remainder> {
+    fn uninject(self) -> Result<(E, TypedKey<E>), Self::Remainder> {
         match self {
             Either::A(effect, key) => Err(Either::A(effect, key)),
             Either::B(rest) => Rest::uninject(rest).map_err(Either::B),
@@ -171,7 +170,7 @@ where
 {
     /// Construct `Self` using an effect and a sender
     #[inline]
-    pub fn inject<E, Index>(effect: E, key: Rc<TypedKey<E>>) -> Self
+    pub fn inject<E, Index>(effect: E, key: TypedKey<E>) -> Self
     where
         E: Effect,
         Self: Inject<E, Index>,
@@ -186,7 +185,7 @@ where
     #[inline]
     pub fn uninject<E, Index>(
         self,
-    ) -> Result<(E, Rc<TypedKey<E>>), <Self as Uninject<E, Index>>::Remainder>
+    ) -> Result<(E, TypedKey<E>), <Self as Uninject<E, Index>>::Remainder>
     where
         E: Effect,
         Self: Uninject<E, Index>,
@@ -201,7 +200,7 @@ where
         f: Func,
     ) -> Result<R, <Self as Uninject<E, Index>>::Remainder>
     where
-        Func: FnOnce(E, Rc<TypedKey<E>>) -> R,
+        Func: FnOnce(E, TypedKey<E>) -> R,
         E: Effect,
         Self: Uninject<E, Index>,
     {
@@ -218,9 +217,9 @@ where
     ) -> Result<R, <<Self as Uninject<E1, Index1>>::Remainder as Uninject<E2, Index2>>::Remainder>
     where
         E1: Effect,
-        Func1: FnOnce(E1, Rc<TypedKey<E1>>) -> R,
+        Func1: FnOnce(E1, TypedKey<E1>) -> R,
         E2: Effect,
-        Func2: FnOnce(E2, Rc<TypedKey<E2>>) -> R,
+        Func2: FnOnce(E2, TypedKey<E2>) -> R,
         Self: Uninject<E1, Index1>,
         <Self as Uninject<E1, Index1>>::Remainder: Uninject<E2, Index2>,
     {

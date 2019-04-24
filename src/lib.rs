@@ -158,15 +158,18 @@ impl LocalKey {
         }
     }
 
-    pub fn typed<E: Effect>(self: Rc<Self>) -> Rc<TypedKey<E>> {
-        let ptr = Rc::into_raw(self) as *const TypedKey<E>;
-        unsafe { Rc::from_raw(ptr) }
+    pub fn typed<E: Effect>(self: Rc<Self>) -> TypedKey<E> {
+        let ptr = Rc::into_raw(self) as *const Cell<Option<NonNull<E::Output>>>;
+        unsafe {
+            TypedKey {
+                storage: Rc::from_raw(ptr),
+            }
+        }
     }
 }
 
-#[repr(transparent)]
 pub struct TypedKey<E: Effect> {
-    storage: Cell<Option<NonNull<E::Output>>>,
+    storage: Rc<Cell<Option<NonNull<E::Output>>>>,
 }
 
 impl<E: Effect> TypedKey<E> {
@@ -195,11 +198,11 @@ impl<E: Effect> TypedKey<E> {
         }
     }
 
-    pub fn continuation(&self) -> Continue<E::Output> {
+    pub fn continuation(self) -> Continue<E::Output> {
         Continue::new()
     }
 
-    pub fn resume(&self, v: E::Output) -> Continue<E::Output> {
+    pub fn resume(self, v: E::Output) -> Continue<E::Output> {
         self.wake(v);
         self.continuation()
     }
