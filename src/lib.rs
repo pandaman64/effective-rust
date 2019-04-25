@@ -34,8 +34,7 @@ macro_rules! Coproduct {
     };
 }
 
-/// Performs an effect, suspending the current computation until the corresponding handler instruct
-/// it to resume
+/// Performs an effect, suspending the current computation until the task gets waken
 #[macro_export]
 macro_rules! perform {
     ($eff:expr) => {{
@@ -79,6 +78,8 @@ macro_rules! perform_from {
     }};
 }
 
+/// An effectful computation block
+/// The block must contain perform! or perform_from!
 #[macro_export]
 macro_rules! effectful {
     ($($tts:tt)*) => {{
@@ -93,6 +94,7 @@ pub trait Effect {
     type Output;
 }
 
+/// A special effect representing the continuation of the source computation in handlers 
 #[derive(Debug)]
 pub struct Continue<R>(PhantomData<R>);
 
@@ -112,10 +114,11 @@ pub enum ComputationState<T, Effect> {
     Done(T),
     /// An effect is thrown
     Effect(Effect),
-    /// A handler is waiting for completion of original computation
+    /// The computation is not ready to continue
     NotReady,
 }
 
+/// The cause of suspension of the computation
 pub enum Suspension<Effect> {
     Effect(Effect),
     NotReady,
