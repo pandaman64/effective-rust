@@ -51,16 +51,12 @@ fn test_state() {
         do_something()
             .handle(
                 |x| eff::pure(x).embed(),
-                |e| {
-                    e.on2(
-                        |GetState(_), k| {
-                            (effectful! { eff::perform!(k.resume(state_ref.get())) }).left()
-                        },
-                        |SetState(x), k| {
-                            (effectful! { eff::perform!(k.resume(state_ref.set(x))) }).right()
-                        },
-                    )
-                }
+                |e| e.on2(
+                    |GetState(_), k| (effectful! { eff::perform!(k.resume(state_ref.get())) })
+                        .left(),
+                    |SetState(x), k| (effectful! { eff::perform!(k.resume(state_ref.set(x))) })
+                        .right(),
+                )
             )
             .block_on(),
         "10\n11\n22"

@@ -14,7 +14,8 @@ use std::marker::PhantomData;
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 use std::ptr::NonNull;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, Thread};
 
 pub use eff_attr::eff;
 pub use pin_utils::pin_mut;
@@ -41,12 +42,12 @@ macro_rules! perform {
         match $eff {
             eff => {
                 let getter = $crate::gen_getter(&eff);
-                let key = $crate::get_key();
+                let cx = $crate::get_task_context();
                 yield $crate::Suspension::Effect($crate::coproduct::Inject::inject(
                     eff,
-                    key.typed(),
+                    cx.typed(),
                 ));
-                getter(&$crate::get_key())
+                getter(&$crate::get_task_context())
             }
         }
     }};
@@ -60,10 +61,10 @@ macro_rules! perform_from {
         match $eff {
             eff => {
                 $crate::pin_mut!(eff);
-                let key = $crate::get_key();
+                let cx = $crate::get_task_context();
                 loop {
                     let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
-                    match $crate::Effectful::resume(eff, std::rc::Rc::clone(&key)) {
+                    match $crate::Effectful::resume(eff, $crate::Context::clone(&cx)) {
                         $crate::ComputationState::Done(x) => break x,
                         $crate::ComputationState::Effect(e) => {
                             yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
@@ -125,33 +126,40 @@ extern "Rust" {
     type Whatever;
 }
 
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct LocalKey {
-    storage: Cell<Option<NonNull<Whatever>>>,
+#[derive(Clone, Debug)]
+pub struct Context {
+    storage: Arc<Mutex<Option<NonNull<Whatever>>>>,
+    thread: Thread,
 }
 
-impl LocalKey {
-    fn new() -> Self {
-        Self {
-            storage: Cell::new(None),
+// raw pointer is just an untyped box, so we can implement Send and Sync (really?)
+unsafe impl Send for Context {}
+unsafe impl Sync for Context {}
+
+impl Context {
+    fn current() -> Self {
+        Context {
+            storage: Arc::new(Mutex::new(None)),
+            thread: thread::current(),
         }
     }
 
     pub fn contains(&self) -> bool {
-        self.storage.get().is_some()
+        self.storage.lock().unwrap().is_some()
     }
 
     pub fn get<T>(&self) -> T {
         unsafe {
             debug!(
-                "LocalKey::get: {}, from {:?}",
+                "Context::get: {}, from {:?}",
                 type_name::<T>(),
-                self.storage.get()
+                self.storage
             );
             *(Box::from_raw(
                 self.storage
-                    .replace(None)
+                    .lock()
+                    .unwrap()
+                    .take()
                     .expect("argument must be set")
                     .as_ptr() as *mut T,
             ))
@@ -160,40 +168,70 @@ impl LocalKey {
 
     pub fn set<T>(&self, v: T) {
         unsafe {
-            debug!("LocalKey::set: {}", type_name::<T>());
-            self.storage.set(Some(NonNull::new_unchecked(
-                Box::into_raw(Box::new(v)) as *mut Whatever
-            )));
+            debug!("Context::set: {}", type_name::<T>());
+            *self.storage.lock().unwrap() = Some(NonNull::new_unchecked(
+                Box::into_raw(Box::new(v)) as *mut Whatever,
+            ));
         }
     }
 
-    pub fn typed<E: Effect>(self: Rc<Self>) -> TypedKey<E> {
-        let ptr = Rc::into_raw(self) as *const Cell<Option<NonNull<E::Output>>>;
+    pub fn typed<E: Effect>(self) -> TypedContext<E> {
+        let ptr = Arc::into_raw(self.storage) as *const Mutex<Option<NonNull<E::Output>>>;
         unsafe {
-            TypedKey {
-                storage: Rc::from_raw(ptr),
+            TypedContext {
+                storage: Arc::from_raw(ptr),
+                thread: self.thread,
             }
         }
     }
 }
 
-pub struct TypedKey<E: Effect> {
-    storage: Rc<Cell<Option<NonNull<E::Output>>>>,
+#[derive(Debug)]
+pub struct TypedContext<E: Effect> {
+    storage: Arc<Mutex<Option<NonNull<E::Output>>>>,
+    thread: Thread,
 }
 
-impl<E: Effect> TypedKey<E> {
+impl<E: Effect> Clone for TypedContext<E> {
+    fn clone(&self) -> Self {
+        Self {
+            storage: Arc::clone(&self.storage),
+            thread: self.thread.clone(),
+        }
+    }
+}
+
+// raw pointer is just an untyped box, so we can implement Send and Sync (really?)
+unsafe impl<E> Send for TypedContext<E>
+where
+    E: Effect,
+    E::Output: Send,
+{
+}
+unsafe impl<E> Sync for TypedContext<E>
+where
+    E: Effect,
+    E::Output: Sync,
+{
+}
+
+impl<E: Effect> TypedContext<E> {
     pub fn wake(&self, v: E::Output) {
+        // set handler result
         unsafe {
             debug!(
-                "TypedKey::set: {} -> {}, to: {:?}",
+                "TypedContext::set: {} -> {}, to: {:?}",
                 type_name::<E>(),
                 type_name::<E::Output>(),
-                self.storage.get(),
+                self.storage,
             );
-            self.storage.set(dbg!(Some(NonNull::new_unchecked(
-                Box::into_raw(Box::new(v)) as *mut E::Output
-            ))));
+            *self.storage.lock().unwrap() = Some(NonNull::new_unchecked(
+                Box::into_raw(Box::new(v)) as *mut E::Output,
+            ));
         }
+
+        // unpark task thread
+        self.thread.unpark()
     }
 
     pub fn continuation<R>(self) -> Continue<R> {
@@ -204,19 +242,13 @@ impl<E: Effect> TypedKey<E> {
         self.wake(v);
         self.continuation()
     }
-
-    /*
-    pub unsafe fn untyped(self: Rc<Self>) -> Rc<LocalKey> {
-        let ptr = Rc::into_raw(self) as *const LocalKey;
-        unsafe { Rc::from_raw(ptr) }
-    }*/
 }
 
-pub fn gen_getter<E>(_e: &E) -> fn(&LocalKey) -> E::Output
+pub fn gen_getter<E>(_e: &E) -> fn(&Context) -> E::Output
 where
     E: Effect,
 {
-    LocalKey::get::<E::Output>
+    Context::get::<E::Output>
 }
 
 /// An effectful computation
@@ -286,22 +318,19 @@ pub trait Effectful {
         let this = self;
         pin_mut!(this);
 
-        let local_key = Rc::new(LocalKey::new());
+        let cx = Context::current();
 
         loop {
-            match this.as_mut().resume(Rc::clone(&local_key)) {
+            match this.as_mut().resume(cx.clone()) {
                 Done(v) => return v,
-                Effect(e) => e, // unreachable
-                NotReady => unimplemented!("current thread must be parked until wake()"),
+                Effect(e) => e,             // unreachable
+                NotReady => thread::park(), // park until wake
             }
         }
     }
 
     /// Resume the execution of this expression
-    fn resume(
-        self: Pin<&mut Self>,
-        key: Rc<LocalKey>,
-    ) -> ComputationState<Self::Output, Self::Effect>;
+    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect>;
 }
 
 /// A boxed effectful computation with type erasured
@@ -312,15 +341,12 @@ impl<'a, Output, Effect> Effectful for Boxed<'a, Output, Effect> {
     type Effect = Effect;
 
     #[inline]
-    fn resume(
-        self: Pin<&mut Self>,
-        key: Rc<LocalKey>,
-    ) -> ComputationState<Self::Output, Self::Effect> {
+    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect> {
         use std::ops::DerefMut;
         unsafe {
             let this = self.get_unchecked_mut();
             let r = this.0.deref_mut();
-            Pin::new_unchecked(r).resume(key)
+            Pin::new_unchecked(r).resume(cx)
         }
     }
 }
@@ -336,10 +362,7 @@ where
     type Effect = !;
 
     #[inline]
-    fn resume(
-        self: Pin<&mut Self>,
-        _key: Rc<LocalKey>,
-    ) -> ComputationState<Self::Output, Self::Effect> {
+    fn resume(self: Pin<&mut Self>, _cx: Context) -> ComputationState<Self::Output, Self::Effect> {
         // TODO: verify soundness
         unsafe {
             let this = self.get_unchecked_mut();
@@ -374,14 +397,11 @@ where
     type Output = C::Output;
     type Effect = Target;
 
-    fn resume(
-        self: Pin<&mut Self>,
-        key: Rc<LocalKey>,
-    ) -> ComputationState<Self::Output, Self::Effect> {
+    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect> {
         use coproduct::Embed;
         use ComputationState::*;
 
-        match unsafe { self.map_unchecked_mut(|this| &mut this.0) }.resume(key) {
+        match unsafe { self.map_unchecked_mut(|this| &mut this.0) }.resume(cx) {
             Done(v) => Done(v),
             Effect(e) => Effect(e.embed()),
             NotReady => NotReady,
@@ -404,55 +424,51 @@ where
     type Effect = Effect;
 
     #[inline]
-    fn resume(
-        self: Pin<&mut Self>,
-        key: Rc<LocalKey>,
-    ) -> ComputationState<Self::Output, Self::Effect> {
+    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect> {
         use Either::*;
 
         // TODO: verify soundness
         unsafe {
             let this = self.get_unchecked_mut();
             match this {
-                A(ref mut left) => Pin::new_unchecked(left).resume(key),
-                B(ref mut right) => Pin::new_unchecked(right).resume(key),
+                A(ref mut left) => Pin::new_unchecked(left).resume(cx),
+                B(ref mut right) => Pin::new_unchecked(right).resume(cx),
             }
         }
     }
 }
 
 thread_local! {
-    static TLS_KEY: Cell<Option<Rc<LocalKey>>> = Cell::new(None);
+    static TLS_CX: Cell<Option<Context>> = Cell::new(None);
 }
 
-struct SetOnDrop(Option<Rc<LocalKey>>);
+struct SetOnDrop(Option<Context>);
 
 impl Drop for SetOnDrop {
     fn drop(&mut self) {
-        TLS_KEY.with(|tls_key| {
-            tls_key.replace(self.0.take());
+        TLS_CX.with(|tls_cx| {
+            tls_cx.replace(self.0.take());
         })
     }
 }
 
-pub fn set_key<F, R>(value: Rc<LocalKey>, f: F) -> R
+pub fn set_task_context<F, R>(cx: Context, f: F) -> R
 where
     F: FnOnce() -> R,
 {
-    let old_value = TLS_KEY.with(|tls_key| tls_key.replace(Some(value)));
-    let _reset = SetOnDrop(old_value);
+    let old_cx = TLS_CX.with(|tls_cx| tls_cx.replace(Some(cx)));
+    let _reset = SetOnDrop(old_cx);
     f()
 }
 
-pub fn get_key() -> Rc<LocalKey> {
-    let key = TLS_KEY
-        .with(|tls_key| {
-            let key = tls_key.replace(None).take();
-            tls_key.set(key.clone());
-            key
+pub fn get_task_context() -> Context {
+    TLS_CX
+        .with(|tls_cx| {
+            let cx = tls_cx.replace(None).take();
+            tls_cx.set(cx.clone());
+            cx
         })
-        .expect("local key must be set");
-    key
+        .expect("thread local context must be set")
 }
 
 pub struct GenEffectful<G>(G);
@@ -475,16 +491,13 @@ where
     /// where the return value of the generator corresponds to the result of the computation
     /// and the yielded values to the effects.
     #[inline]
-    fn resume(
-        self: Pin<&mut Self>,
-        key: Rc<LocalKey>,
-    ) -> ComputationState<Self::Output, Self::Effect> {
+    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect> {
         use ComputationState::*;
         use GeneratorState::*;
 
         unsafe {
             let this = &mut self.get_unchecked_mut().0;
-            set_key(key, || match Pin::new_unchecked(this).resume() {
+            set_task_context(cx, || match Pin::new_unchecked(this).resume() {
                 Complete(v) => Done(v),
                 Yielded(Suspension::Effect(e)) => Effect(e),
                 Yielded(Suspension::NotReady) => NotReady,
@@ -525,7 +538,7 @@ where
     #[inline]
     fn resume(
         mut self: Pin<&mut Self>,
-        key: Rc<LocalKey>,
+        cx: Context,
     ) -> ComputationState<Self::Output, Self::Effect> {
         use ComputationState::*;
 
@@ -535,7 +548,7 @@ where
             loop {
                 match &mut this.state {
                     ActiveComputation::Source => {
-                        match Pin::new_unchecked(&mut this.source).resume(Rc::clone(&key)) {
+                        match Pin::new_unchecked(&mut this.source).resume(cx.clone()) {
                             Done(v) => {
                                 if this.handler_stack.is_empty() {
                                     this.state = ActiveComputation::ValueHandler(this
@@ -547,7 +560,7 @@ where
                                 } else {
                                     // fulfill Continue<Output> effect
                                     this.state = ActiveComputation::Handler;
-                                    key.set(v);
+                                    cx.set(v);
                                 }
                             }
                             Effect(e) => match (this.handler)(e) {
@@ -562,7 +575,7 @@ where
                     }
                     ActiveComputation::Handler => {
                         let handler = this.handler_stack.last_mut().unwrap();
-                        match Pin::new_unchecked(&mut **handler).resume(Rc::clone(&key)) {
+                        match Pin::new_unchecked(&mut **handler).resume(cx.clone()) {
                             Done(v) => {
                                 this.handler_stack.pop();
 
@@ -570,7 +583,7 @@ where
                                 if this.handler_stack.is_empty() {
                                     return Done(v);
                                 } else {
-                                    key.set(v);
+                                    cx.set(v);
                                 }
                             }
                             Effect(coproduct::Either::A(_, _)) => {
@@ -579,7 +592,7 @@ where
 
                                 // if the handler has already waken the task, continue the computation
                                 // otherwise, wait until wake() is called
-                                if !key.contains() {
+                                if !cx.contains() {
                                     return NotReady;
                                 }
                             }
@@ -588,12 +601,12 @@ where
                         }
                     }
                     ActiveComputation::ValueHandler(ref mut x) => {
-                        match Pin::new_unchecked(x).resume(Rc::clone(&key)) {
+                        match Pin::new_unchecked(x).resume(cx.clone()) {
                             Done(v) => {
                                 if this.handler_stack.is_empty() {
                                     return Done(v);
                                 } else {
-                                    key.set(v);
+                                    cx.set(v);
                                     this.state = ActiveComputation::Handler;
                                 }
                             }

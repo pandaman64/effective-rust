@@ -34,25 +34,21 @@ fn test_perform_from() {
     assert_eq!(
         e.handle(
             |x| pure(x).embed(),
-            |e| {
-                e.on(|Foo, k| {
-                    effectful! {
-                        println!("foo");
-                        perform!(k.resume(42))
-                    }
-                })
-            }
+            |e| e.on(|Foo, k| {
+                effectful! {
+                    println!("foo");
+                    perform!(k.resume(42))
+                }
+            })
         )
         .handle(
             |x| pure(x).embed(),
-            |e| {
-                e.on(|Bar(x), k| {
-                    effectful! {
-                        println!("Bar({})", x);
-                        perform!(k.resume(x + 2))
-                    }
-                })
-            }
+            |e| e.on(|Bar(x), k| {
+                effectful! {
+                    println!("Bar({})", x);
+                    perform!(k.resume(x + 2))
+                }
+            })
         )
         .block_on(),
         44

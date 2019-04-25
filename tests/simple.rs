@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait, never_type, impl_trait_in_bindings)]
+#![feature(generators, generator_trait, never_type)]
 
 use eff::*;
 
@@ -20,13 +20,13 @@ fn test_simple() {
         e.handle(
             |x| eff::pure(x).embed(),
             |e| {
-                e.on(|Eff, key| {
+                e.on(|Eff, k| {
                     effectful! {
-                        key.wake("Hello".into());
-                        perform!(key.continuation())
+                        k.wake("Hello".into());
+                        perform!(k.continuation())
 
                         // or
-                        // perform!(key.resume("Hello".into()))
+                        // perform!(cx.resume("Hello".into()))
                     }
                 })
             }
