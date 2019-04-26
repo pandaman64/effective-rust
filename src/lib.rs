@@ -387,6 +387,11 @@ pub trait Effectful {
     /// When a handler decides to handle an effect, it will register the interest in the result for
     /// the current task. In this case, `poll` returns `Poll::NotReady` until the task gets woken up
     /// with the outcome of the effect.
+    ///
+    /// # Panics
+    /// After the completion of the computation (`poll` returned `Poll::Done`), future calls to `poll`
+    /// may panic, or cause any bad behavior. The `Effectful` trait does not provide any guarantees
+    /// about the safety of calling `poll` after the task has finished.
     fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect>;
 }
 
@@ -422,7 +427,7 @@ where
     /// Execute the computation
     ///
     /// # Panics
-    /// If the task is polled again after completion, this method panics
+    /// Panics if the task is polled again after completion
     #[inline]
     fn poll(self: Pin<&mut Self>, _cx: Context) -> Poll<Self::Output, Self::Effect> {
         unsafe {
@@ -526,6 +531,9 @@ where
 }
 
 /// Get the thread-local task context used by generator-backed effectful computation
+///
+/// # Panics
+/// Panics if the thread-local task is not set
 pub fn get_task_context() -> Context {
     TLS_CX
         .with(|tls_cx| {
