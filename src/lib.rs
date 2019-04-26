@@ -40,13 +40,19 @@ macro_rules! perform {
     ($eff:expr) => {{
         match $eff {
             eff => {
-                let getter = $crate::gen_getter(&eff);
+                let taker = $crate::gen_taker(&eff);
                 let cx = $crate::get_task_context();
                 yield $crate::Suspension::Effect($crate::coproduct::Inject::inject(
                     eff,
                     cx.typed(),
                 ));
-                getter(&$crate::get_task_context())
+                loop {
+                    if let Some(v) = taker(&$crate::get_task_context()) {
+                        break v;
+                    } else {
+                        yield $crate::Suspension::NotReady;
+                    }
+                }
             }
         }
     }};
@@ -151,21 +157,20 @@ impl Context {
         self.storage.lock().unwrap().is_some()
     }
 
-    pub fn get<T>(&self) -> T {
+    /// Takes the value out of the task local storage
+    pub fn take<T>(&self) -> Option<T> {
         unsafe {
             debug!(
                 "Context::get: {}, from {:?}",
                 type_name::<T>(),
                 self.storage
             );
-            *(Box::from_raw(
-                self.storage
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .expect("argument must be set")
-                    .as_ptr() as *mut T,
-            ))
+
+            self.storage
+                .lock()
+                .unwrap()
+                .take()
+                .map(|non_null| *(Box::from_raw(non_null.as_ptr() as *mut T)))
         }
     }
 
@@ -247,11 +252,11 @@ impl<E: Effect> TypedContext<E> {
     }
 }
 
-pub fn gen_getter<E>(_e: &E) -> fn(&Context) -> E::Output
+pub fn gen_taker<E>(_e: &E) -> fn(&Context) -> Option<E::Output>
 where
     E: Effect,
 {
-    Context::get::<E::Output>
+    Context::take::<E::Output>
 }
 
 /// An effectful computation
