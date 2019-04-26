@@ -1,9 +1,4 @@
-#![feature(
-    generator_trait,
-    never_type,
-    core_intrinsics,
-    extern_types
-)]
+#![feature(generator_trait, never_type, core_intrinsics, extern_types)]
 
 use log::debug;
 use std::cell::Cell;
