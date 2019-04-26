@@ -63,12 +63,12 @@ macro_rules! perform_from {
                 let cx = $crate::get_task_context();
                 loop {
                     let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
-                    match $crate::Effectful::resume(eff, $crate::Context::clone(&cx)) {
-                        $crate::ComputationState::Done(x) => break x,
-                        $crate::ComputationState::Effect(e) => {
+                    match $crate::Effectful::poll(eff, $crate::Context::clone(&cx)) {
+                        $crate::Poll::Done(x) => break x,
+                        $crate::Poll::Effect(e) => {
                             yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
                         }
-                        $crate::ComputationState::NotReady => {
+                        $crate::Poll::NotReady => {
                             yield $crate::Suspension::NotReady;
                         }
                     }
@@ -94,7 +94,7 @@ pub trait Effect {
     type Output;
 }
 
-/// A special effect representing the continuation of the source computation in handlers 
+/// A special effect representing the continuation of the source computation in handlers
 #[derive(Debug)]
 pub struct Continue<R>(PhantomData<R>);
 
@@ -109,7 +109,7 @@ impl<R> Continue<R> {
 }
 
 /// A state of an effectful computation
-pub enum ComputationState<T, Effect> {
+pub enum Poll<T, Effect> {
     /// This computation is done
     Done(T),
     /// An effect is thrown
@@ -316,7 +316,7 @@ pub trait Effectful {
     where
         Self: Sized + Effectful<Effect = !>,
     {
-        use ComputationState::*;
+        use Poll::*;
 
         let this = self;
         pin_mut!(this);
@@ -324,7 +324,7 @@ pub trait Effectful {
         let cx = Context::current();
 
         loop {
-            match this.as_mut().resume(cx.clone()) {
+            match this.as_mut().poll(cx.clone()) {
                 Done(v) => return v,
                 Effect(e) => e,             // unreachable
                 NotReady => thread::park(), // park until wake
@@ -332,8 +332,8 @@ pub trait Effectful {
         }
     }
 
-    /// Resume the execution of this expression
-    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect>;
+    /// poll the execution of this expression
+    fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect>;
 }
 
 /// A boxed effectful computation with type erasured
@@ -344,12 +344,12 @@ impl<'a, Output, Effect> Effectful for Boxed<'a, Output, Effect> {
     type Effect = Effect;
 
     #[inline]
-    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect> {
+    fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
         use std::ops::DerefMut;
         unsafe {
             let this = self.get_unchecked_mut();
             let r = this.0.deref_mut();
-            Pin::new_unchecked(r).resume(cx)
+            Pin::new_unchecked(r).poll(cx)
         }
     }
 }
@@ -365,11 +365,11 @@ where
     type Effect = !;
 
     #[inline]
-    fn resume(self: Pin<&mut Self>, _cx: Context) -> ComputationState<Self::Output, Self::Effect> {
+    fn poll(self: Pin<&mut Self>, _cx: Context) -> Poll<Self::Output, Self::Effect> {
         // TODO: verify soundness
         unsafe {
             let this = self.get_unchecked_mut();
-            ComputationState::Done(this.0.take().expect("resume after completion")())
+            Poll::Done(this.0.take().expect("poll after completion")())
         }
     }
 }
@@ -400,11 +400,11 @@ where
     type Output = C::Output;
     type Effect = Target;
 
-    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect> {
+    fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
         use coproduct::Embed;
-        use ComputationState::*;
+        use Poll::*;
 
-        match unsafe { self.map_unchecked_mut(|this| &mut this.0) }.resume(cx) {
+        match unsafe { self.map_unchecked_mut(|this| &mut this.0) }.poll(cx) {
             Done(v) => Done(v),
             Effect(e) => Effect(e.embed()),
             NotReady => NotReady,
@@ -427,15 +427,15 @@ where
     type Effect = Effect;
 
     #[inline]
-    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect> {
+    fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
         use Either::*;
 
         // TODO: verify soundness
         unsafe {
             let this = self.get_unchecked_mut();
             match this {
-                A(ref mut left) => Pin::new_unchecked(left).resume(cx),
-                B(ref mut right) => Pin::new_unchecked(right).resume(cx),
+                A(ref mut left) => Pin::new_unchecked(left).poll(cx),
+                B(ref mut right) => Pin::new_unchecked(right).poll(cx),
             }
         }
     }
@@ -494,9 +494,9 @@ where
     /// where the return value of the generator corresponds to the result of the computation
     /// and the yielded values to the effects.
     #[inline]
-    fn resume(self: Pin<&mut Self>, cx: Context) -> ComputationState<Self::Output, Self::Effect> {
-        use ComputationState::*;
+    fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
         use GeneratorState::*;
+        use Poll::*;
 
         unsafe {
             let this = &mut self.get_unchecked_mut().0;
@@ -539,11 +539,8 @@ where
     // I'm not sure whether this inline improves the performance;
     // this method is much larger than I expected
     #[inline]
-    fn resume(
-        mut self: Pin<&mut Self>,
-        cx: Context,
-    ) -> ComputationState<Self::Output, Self::Effect> {
-        use ComputationState::*;
+    fn poll(mut self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
+        use Poll::*;
 
         // TODO: verify soundness
         unsafe {
@@ -551,13 +548,13 @@ where
             loop {
                 match &mut this.state {
                     ActiveComputation::Source => {
-                        match Pin::new_unchecked(&mut this.source).resume(cx.clone()) {
+                        match Pin::new_unchecked(&mut this.source).poll(cx.clone()) {
                             Done(v) => {
                                 if this.handler_stack.is_empty() {
                                     this.state = ActiveComputation::ValueHandler(this
                                         .value_handler
                                         .take()
-                                        .expect("resume after completion")(
+                                        .expect("poll after completion")(
                                         v
                                     ));
                                 } else {
@@ -578,7 +575,7 @@ where
                     }
                     ActiveComputation::Handler => {
                         let handler = this.handler_stack.last_mut().unwrap();
-                        match Pin::new_unchecked(&mut **handler).resume(cx.clone()) {
+                        match Pin::new_unchecked(&mut **handler).poll(cx.clone()) {
                             Done(v) => {
                                 this.handler_stack.pop();
 
@@ -604,7 +601,7 @@ where
                         }
                     }
                     ActiveComputation::ValueHandler(ref mut x) => {
-                        match Pin::new_unchecked(x).resume(cx.clone()) {
+                        match Pin::new_unchecked(x).poll(cx.clone()) {
                             Done(v) => {
                                 if this.handler_stack.is_empty() {
                                     return Done(v);
