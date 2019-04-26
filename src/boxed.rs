@@ -17,7 +17,7 @@ impl<'a, Output, Effect> Effectful for Boxed<'a, Output, Effect> {
 
     /// Poll the inner computation
     #[inline]
-    fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
+    fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         use std::ops::DerefMut;
         unsafe {
             let this = self.get_unchecked_mut();

@@ -26,10 +26,10 @@ fn test_multithread() {
                 |e| e.on(|LongComputation, k| {
                     eff::effectful! {
                         thread::spawn({
-                            let k = k.clone();
+                            let waker = k.waker();
                             move || {
                                 thread::sleep(Duration::from_millis(500));
-                                k.wake(42)
+                                waker.wake(42)
                             }
                         });
                         eff::perform!(k.continuation()) + 200

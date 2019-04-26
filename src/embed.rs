@@ -23,7 +23,7 @@ where
     type Effect = Target;
 
     #[inline]
-    fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
+    fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         use Poll::*;
 
         match unsafe { self.map_unchecked_mut(|this| &mut this.0) }.poll(cx) {

@@ -17,7 +17,7 @@ where
     /// # Panics
     /// Panics if the task is polled again after completion
     #[inline]
-    fn poll(self: Pin<&mut Self>, _cx: Context) -> Poll<Self::Output, Self::Effect> {
+    fn poll(self: Pin<&mut Self>, _cx: &Context) -> Poll<Self::Output, Self::Effect> {
         unsafe {
             let this = self.get_unchecked_mut();
             Poll::Done(this.0.take().expect("poll after completion")())

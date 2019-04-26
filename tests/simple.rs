@@ -22,7 +22,7 @@ fn test_simple() {
             |e| {
                 e.on(|Eff, k| {
                     effectful! {
-                        k.wake("Hello".into());
+                        k.waker().wake("Hello".into());
                         perform!(k.continuation())
 
                         // or

@@ -75,7 +75,7 @@ macro_rules! perform_from {
                 let cx = $crate::context::get_task_context();
                 loop {
                     let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
-                    match $crate::Effectful::poll(eff, $crate::Context::clone(&cx)) {
+                    match $crate::Effectful::poll(eff, cx) {
                         $crate::Poll::Done(x) => break x,
                         $crate::Poll::Effect(e) => {
                             yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
@@ -217,7 +217,7 @@ pub trait Effectful {
         let cx = Context::current();
 
         loop {
-            match this.as_mut().poll(cx.clone()) {
+            match this.as_mut().poll(&cx) {
                 Done(v) => return v,
                 Effect(e) => e,             // unreachable
                 NotReady => thread::park(), // park until wake
@@ -246,5 +246,5 @@ pub trait Effectful {
     /// After the completion of the computation (`poll` returned `Poll::Done`), future calls to `poll`
     /// may panic, or cause any bad behavior. The `Effectful` trait does not provide any guarantees
     /// about the safety of calling `poll` after the task has finished.
-    fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect>;
+    fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect>;
 }

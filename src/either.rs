@@ -17,7 +17,7 @@ where
     type Effect = Effect;
 
     #[inline]
-    fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
+    fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         use Either::*;
         unsafe {
             let this = self.get_unchecked_mut();

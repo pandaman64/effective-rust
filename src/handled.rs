@@ -44,7 +44,7 @@ where
     // I'm not sure whether this inline improves the performance;
     // this method is much larger than I expected
     #[inline]
-    fn poll(mut self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
+    fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         use Poll::*;
 
         // TODO: verify soundness
@@ -53,7 +53,7 @@ where
             loop {
                 match &mut this.state {
                     ActiveComputation::Source => {
-                        match Pin::new_unchecked(&mut this.source).poll(cx.clone()) {
+                        match Pin::new_unchecked(&mut this.source).poll(cx) {
                             Done(v) => {
                                 if this.handler_stack.is_empty() {
                                     this.state = ActiveComputation::ValueHandler(this
@@ -80,7 +80,7 @@ where
                     }
                     ActiveComputation::Handler => {
                         let handler = this.handler_stack.last_mut().unwrap();
-                        match Pin::new_unchecked(&mut **handler).poll(cx.clone()) {
+                        match Pin::new_unchecked(&mut **handler).poll(cx) {
                             Done(v) => {
                                 this.handler_stack.pop();
 
@@ -106,7 +106,7 @@ where
                         }
                     }
                     ActiveComputation::ValueHandler(ref mut x) => {
-                        match Pin::new_unchecked(x).poll(cx.clone()) {
+                        match Pin::new_unchecked(x).poll(cx) {
                             Done(v) => {
                                 if this.handler_stack.is_empty() {
                                     return Done(v);

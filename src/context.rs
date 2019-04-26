@@ -9,7 +9,7 @@ use std::thread::{self, Thread};
 use log::debug;
 
 thread_local! {
-    static TLS_CX: Cell<Option<Context>> = Cell::new(None);
+    static TLS_CX: Cell<Option<&'static Context>> = Cell::new(None);
 }
 
 extern "Rust" {
@@ -17,7 +17,7 @@ extern "Rust" {
 }
 
 /// The untyped context of an effectful computation
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Context {
     storage: Arc<Mutex<Option<NonNull<Whatever>>>>,
     thread: Thread,
@@ -70,29 +70,26 @@ impl Context {
         }
     }
 
-    /// Create a typed context referring to the same task local storage
-    pub fn typed<E: Effect>(self) -> TypedContext<E> {
-        let ptr = Arc::into_raw(self.storage) as *const Mutex<Option<NonNull<E::Output>>>;
+    /// Create a typed context which shares the same task local storage
+    pub fn typed<E: Effect>(&self) -> TypedContext<E> {
+        let ptr =
+            Arc::into_raw(Arc::clone(&self.storage)) as *const Mutex<Option<NonNull<E::Output>>>;
         unsafe {
-            TypedContext {
+            TypedContext(Waker {
                 storage: Arc::from_raw(ptr),
-                thread: self.thread,
-            }
+                thread: self.thread.clone(),
+            })
         }
     }
 }
 
-/// The typed context of an computation
-#[derive(Debug)]
-pub struct TypedContext<E: Effect> {
+/// The waker of the task
+pub struct Waker<E: Effect> {
     storage: Arc<Mutex<Option<NonNull<E::Output>>>>,
     thread: Thread,
 }
 
-// TODO: This `Clone` impl allows users to create multiple `Continue` and to resume the source
-// computation multiple times in a handler, which is an undefined behavior because the second
-// resumption leads to a poll after completion
-impl<E: Effect> Clone for TypedContext<E> {
+impl<E: Effect> Clone for Waker<E> {
     fn clone(&self) -> Self {
         Self {
             storage: Arc::clone(&self.storage),
@@ -101,27 +98,13 @@ impl<E: Effect> Clone for TypedContext<E> {
     }
 }
 
-// raw pointer is just an untyped box, so we can implement Send and Sync (really?)
-unsafe impl<E> Send for TypedContext<E>
-where
-    E: Effect,
-    E::Output: Send,
-{
-}
-unsafe impl<E> Sync for TypedContext<E>
-where
-    E: Effect,
-    E::Output: Sync,
-{
-}
-
-impl<E: Effect> TypedContext<E> {
+impl<E: Effect> Waker<E> {
     /// Wake up the task associated with this context
     pub fn wake(&self, v: E::Output) {
         // set handler result
         unsafe {
             debug!(
-                "TypedContext::set: {} -> {}, to: {:?}",
+                "Waker::set: {} -> {}, to: {:?}",
                 type_name::<E>(),
                 type_name::<E::Output>(),
                 self.storage,
@@ -134,6 +117,29 @@ impl<E: Effect> TypedContext<E> {
         // unpark task thread
         self.thread.unpark()
     }
+}
+
+// raw pointer is just an untyped box, so we can implement Send and Sync (really?)
+unsafe impl<E> Send for Waker<E>
+where
+    E: Effect,
+    E::Output: Send,
+{
+}
+unsafe impl<E> Sync for Waker<E>
+where
+    E: Effect,
+    E::Output: Sync,
+{
+}
+
+/// The typed context of an computation
+pub struct TypedContext<E: Effect>(Waker<E>);
+
+impl<E: Effect> TypedContext<E> {
+    pub fn waker(&self) -> Waker<E> {
+        self.0.clone()
+    }
 
     /// Create a `Continue` effect for the completion of the source computation
     pub fn continuation<R>(self) -> Continue<R> {
@@ -144,7 +150,7 @@ impl<E: Effect> TypedContext<E> {
     ///
     /// This method can be used to immediately resume the source computation
     pub fn resume<R>(self, v: E::Output) -> Continue<R> {
-        self.wake(v);
+        self.0.wake(v);
         self.continuation()
     }
 }
@@ -157,7 +163,7 @@ where
     Context::take::<E::Output>
 }
 
-struct SetOnDrop(Option<Context>);
+struct SetOnDrop(Option<&'static Context>);
 
 impl Drop for SetOnDrop {
     fn drop(&mut self) {
@@ -168,11 +174,15 @@ impl Drop for SetOnDrop {
 }
 
 /// Set the thread-local task context used by generator-backed effectful computation
-pub fn set_task_context<F, R>(cx: Context, f: F) -> R
+pub fn set_task_context<F, R>(cx: &Context, f: F) -> R
 where
     F: FnOnce() -> R,
 {
-    let old_cx = TLS_CX.with(|tls_cx| tls_cx.replace(Some(cx)));
+    let old_cx = TLS_CX.with(|tls_cx| {
+        tls_cx.replace(Some(unsafe {
+            &*(cx as *const Context) as &'static Context
+        }))
+    });
     let _reset = SetOnDrop(old_cx);
     f()
 }
@@ -181,11 +191,10 @@ where
 ///
 /// # Panics
 /// Panics if the thread-local task is not set
-pub fn get_task_context() -> Context {
+pub fn get_task_context<'a>() -> &'a Context {
     TLS_CX
         .with(|tls_cx| {
-            let cx = tls_cx.replace(None).take();
-            tls_cx.set(cx.clone());
+            let cx = tls_cx.get().take();
             cx
         })
         .expect("thread local context must be set")
