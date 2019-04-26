@@ -13,7 +13,6 @@ dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "pin-utils 0.1.0-alpha.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro-hack 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "rich-phantoms 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -23,7 +22,7 @@ dependencies = [
  "proc-macro-hack 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro2 0.4.28 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)",
- "syn 0.15.32 (registry+https://github.com/rust-lang/crates.io-index)",
+ "syn 0.15.33 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -34,7 +33,7 @@ dependencies = [
  "proc-macro-hack 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro2 0.4.28 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)",
- "syn 0.15.32 (registry+https://github.com/rust-lang/crates.io-index)",
+ "syn 0.15.33 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -57,7 +56,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "proc-macro2 0.4.28 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)",
- "syn 0.15.32 (registry+https://github.com/rust-lang/crates.io-index)",
+ "syn 0.15.33 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -77,13 +76,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "rich-phantoms"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-
-[[package]]
 name = "syn"
-version = "0.15.32"
+version = "0.15.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "proc-macro2 0.4.28 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -104,6 +98,5 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum proc-macro-hack 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)" = "6a9bed9ebc40cf53e3a76d7486c54d05002eae6485b2711ab9104476fb2eb8bc"
 "checksum proc-macro2 0.4.28 (registry+https://github.com/rust-lang/crates.io-index)" = "ba92c84f814b3f9a44c5cfca7d2ad77fa10710867d2bbb1b3d175ab5f47daa12"
 "checksum quote 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)" = "faf4799c5d274f3868a4aae320a0a182cbd2baee377b378f080e16a23e9d80db"
-"checksum rich-phantoms 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e57d6423edb16dba439ca95583445237bd63d292a05bec1d24408f896f1c55c1"
-"checksum syn 0.15.32 (registry+https://github.com/rust-lang/crates.io-index)" = "846620ec526c1599c070eff393bfeeeb88a93afa2513fc3b49f1fea84cf7b0ed"
+"checksum syn 0.15.33 (registry+https://github.com/rust-lang/crates.io-index)" = "ec52cd796e5f01d0067225a5392e70084acc4c0013fa71d55166d38a8b307836"
 "checksum unicode-xid 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc"

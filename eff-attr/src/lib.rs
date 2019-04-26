@@ -10,12 +10,14 @@ use proc_macro::TokenStream;
 
 type TokenStream2 = proc_macro2::TokenStream;
 
+/// Declare the function to be an effectful computation whose effect type is the coproduct of the arguments
+///
+/// This macro transforms the function like what `async fn` does
 #[proc_macro_attribute]
 pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
     use syn::parse::Parser;
     use syn::punctuated::Punctuated;
 
-    // TODO: parse #[eff(lifetime = 'a)]
     let effects_parser = Punctuated::<syn::Type, Token![,]>::parse_terminated;
     let types = effects_parser
         .parse(attr)

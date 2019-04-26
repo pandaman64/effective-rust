@@ -1,6 +1,4 @@
 #![feature(
-    nll,
-    generators,
     generator_trait,
     never_type,
     core_intrinsics,
@@ -18,7 +16,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, Thread};
 
 pub use eff_attr::eff;
+#[doc(hidden)]
 pub use pin_utils::pin_mut;
+#[doc(hidden)]
 pub use std::pin as pin_reexport;
 
 pub mod coproduct;
@@ -58,7 +58,8 @@ macro_rules! perform {
     }};
 }
 
-/// Runs an effectful computation and retrieve the result of it.
+/// Runs an effectful computation under the current context
+///
 /// When the computation performs an effect, this computation re-perform it as is
 #[macro_export]
 macro_rules! perform_from {
@@ -85,7 +86,8 @@ macro_rules! perform_from {
 }
 
 /// An effectful computation block
-/// The block must contain perform! or perform_from!
+///
+/// The block must contain `perform!` or `perform_from!`
 #[macro_export]
 macro_rules! effectful {
     ($($tts:tt)*) => {{
@@ -116,9 +118,9 @@ impl<R> Continue<R> {
 
 /// A state of an effectful computation
 pub enum Poll<T, Effect> {
-    /// This computation is done
+    /// The computation is done
     Done(T),
-    /// An effect is thrown
+    /// An effect has been performed
     Effect(Effect),
     /// The computation is not ready to continue
     NotReady,
@@ -130,11 +132,11 @@ pub enum Suspension<Effect> {
     NotReady,
 }
 
-// TODO: verify soundness
 extern "Rust" {
     type Whatever;
 }
 
+/// The untyped context of an effectful computation
 #[derive(Clone, Debug)]
 pub struct Context {
     storage: Arc<Mutex<Option<NonNull<Whatever>>>>,
@@ -146,13 +148,17 @@ unsafe impl Send for Context {}
 unsafe impl Sync for Context {}
 
 impl Context {
-    fn current() -> Self {
+    /// Create a context within the current thread
+    pub fn current() -> Self {
         Context {
             storage: Arc::new(Mutex::new(None)),
             thread: thread::current(),
         }
     }
 
+    /// Returns true if the task local storage contains any value
+    ///
+    /// Returns false if it does not.
     pub fn contains(&self) -> bool {
         self.storage.lock().unwrap().is_some()
     }
@@ -174,6 +180,7 @@ impl Context {
         }
     }
 
+    /// Assign a value to the task local storage
     pub fn set<T>(&self, v: T) {
         unsafe {
             debug!("Context::set: {}", type_name::<T>());
@@ -183,6 +190,7 @@ impl Context {
         }
     }
 
+    /// Create a typed context referring to the same task local storage
     pub fn typed<E: Effect>(self) -> TypedContext<E> {
         let ptr = Arc::into_raw(self.storage) as *const Mutex<Option<NonNull<E::Output>>>;
         unsafe {
@@ -194,12 +202,16 @@ impl Context {
     }
 }
 
+/// The typed context of an computation
 #[derive(Debug)]
 pub struct TypedContext<E: Effect> {
     storage: Arc<Mutex<Option<NonNull<E::Output>>>>,
     thread: Thread,
 }
 
+// TODO: This `Clone` impl allows users to create multiple `Continue` and to resume the source
+// computation multiple times in a handler, which is an undefined behavior because the second
+// resumption leads to a poll after completion
 impl<E: Effect> Clone for TypedContext<E> {
     fn clone(&self) -> Self {
         Self {
@@ -224,6 +236,7 @@ where
 }
 
 impl<E: Effect> TypedContext<E> {
+    /// Wake up the task associated with this context
     pub fn wake(&self, v: E::Output) {
         // set handler result
         unsafe {
@@ -242,16 +255,21 @@ impl<E: Effect> TypedContext<E> {
         self.thread.unpark()
     }
 
+    /// Create a `Continue` effect for the completion of the source computation
     pub fn continuation<R>(self) -> Continue<R> {
         Continue::new()
     }
 
+    /// Wake up the task and create a `Continue` effect
+    ///
+    /// This method can be used to immediately resume the source computation
     pub fn resume<R>(self, v: E::Output) -> Continue<R> {
         self.wake(v);
         self.continuation()
     }
 }
 
+/// Helper function for taking the output of an effect of the desired type out of the task local storage
 pub fn gen_taker<E>(_e: &E) -> fn(&Context) -> Option<E::Output>
 where
     E: Effect,
@@ -261,9 +279,14 @@ where
 
 /// An effectful computation
 pub trait Effectful {
+    /// The type of the final result
     type Output;
+
+    /// The type of the effects this computation will produce
     type Effect;
 
+    /// Takes a value handler and an effect handler and creates an effectful computation with
+    /// effects handled
     #[inline]
     fn handle<H, HC, VH, VHC, NewEffect>(
         self,
@@ -284,6 +307,7 @@ pub trait Effectful {
         }
     }
 
+    /// Create an effectful computation whose effect is a superset of that of this one
     #[inline]
     fn embed<Target, Indices>(self) -> EmbedEffect<Self, Target, Indices>
     where
@@ -292,6 +316,7 @@ pub trait Effectful {
         EmbedEffect(self, PhantomData)
     }
 
+    /// Combine this and the other computation with the same signature
     #[inline]
     fn left<R>(self) -> Either<Self, R>
     where
@@ -300,6 +325,7 @@ pub trait Effectful {
         Either::A(self)
     }
 
+    /// Combine this and the other computation with the same signature
     #[inline]
     fn right<L>(self) -> Either<L, Self>
     where
@@ -308,6 +334,9 @@ pub trait Effectful {
         Either::B(self)
     }
 
+    /// Create a boxed computation
+    ///
+    /// This function can be used to erase `Self` type
     #[inline]
     fn boxed<'a>(self) -> Boxed<'a, Self::Output, Self::Effect>
     where
@@ -316,6 +345,11 @@ pub trait Effectful {
         Boxed(Box::new(self))
     }
 
+    /// Run this computation to completion on the current thread
+    ///
+    /// This method blocks the current thread while waiting for the progress of the computation
+    ///
+    /// The effect type of this computation must be an empty set (never type) since there is no handler
     #[inline]
     fn block_on(self) -> Self::Output
     where
@@ -337,17 +371,33 @@ pub trait Effectful {
         }
     }
 
-    /// poll the execution of this expression
+    /// Resume the computation to a final value, registering the current task
+    /// for wakeup if a handler starts handling an effect performed by the task
+    ///
+    /// # Return value
+    /// This function returns:
+    /// - `Poll::Done(v)` with a result `v` if the computation completed successfully
+    /// - `Poll::Effect(e)` with an effect `e` if the computation performed a computational effect
+    /// - `Poll::NotReady` if the computation is not ready to continue because a handler is handling an effect
+    ///
+    /// Once a computation has completed, clients should not `poll` it again
+    ///
+    /// When a computation performs an effect, `poll` returns `Poll::Effect(e)` with the effect `e`
+    ///
+    /// When a handler decides to handle an effect, it will register the interest in the result for
+    /// the current task. In this case, `poll` returns `Poll::NotReady` until the task gets woken up
+    /// with the outcome of the effect.
     fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect>;
 }
 
-/// A boxed effectful computation with type erasured
+/// A boxed effectful computation with type erased
 pub struct Boxed<'a, Output, Effect>(Box<dyn Effectful<Output = Output, Effect = Effect> + 'a>);
 
 impl<'a, Output, Effect> Effectful for Boxed<'a, Output, Effect> {
     type Output = Output;
     type Effect = Effect;
 
+    /// Poll the inner computation
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
         use std::ops::DerefMut;
@@ -369,9 +419,12 @@ where
     type Output = T;
     type Effect = !;
 
+    /// Execute the computation
+    ///
+    /// # Panics
+    /// If the task is polled again after completion, this method panics
     #[inline]
     fn poll(self: Pin<&mut Self>, _cx: Context) -> Poll<Self::Output, Self::Effect> {
-        // TODO: verify soundness
         unsafe {
             let this = self.get_unchecked_mut();
             Poll::Done(this.0.take().expect("poll after completion")())
@@ -395,6 +448,9 @@ pub fn pure<T>(v: T) -> impl Effectful<Output = T, Effect = !> {
     lazy(move || v)
 }
 
+/// An effectful computation created by `embed()` combinator
+///
+/// `EmbedEffect` is used to "widen" the effect that the task will perform
 pub struct EmbedEffect<C, Target, Indices>(C, PhantomData<(Target, Indices)>);
 
 impl<C, Target, Indices> Effectful for EmbedEffect<C, Target, Indices>
@@ -405,6 +461,7 @@ where
     type Output = C::Output;
     type Effect = Target;
 
+    #[inline]
     fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
         use coproduct::Embed;
         use Poll::*;
@@ -434,8 +491,6 @@ where
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
         use Either::*;
-
-        // TODO: verify soundness
         unsafe {
             let this = self.get_unchecked_mut();
             match this {
@@ -460,6 +515,7 @@ impl Drop for SetOnDrop {
     }
 }
 
+/// Set the thread-local task context used by generator-backed effectful computation
 pub fn set_task_context<F, R>(cx: Context, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -469,6 +525,7 @@ where
     f()
 }
 
+/// Get the thread-local task context used by generator-backed effectful computation
 pub fn get_task_context() -> Context {
     TLS_CX
         .with(|tls_cx| {
@@ -479,8 +536,9 @@ pub fn get_task_context() -> Context {
         .expect("thread local context must be set")
 }
 
-pub struct GenEffectful<G>(G);
+struct GenEffectful<G>(G);
 
+/// Create an effectful computation which wraps a generator
 pub fn from_generator<G, Output, Effect>(x: G) -> impl Effectful<Output = Output, Effect = Effect>
 where
     G: Generator<Return = Output, Yield = Suspension<Effect>>,
@@ -495,9 +553,6 @@ where
     type Output = Output;
     type Effect = Effect;
 
-    /// A generator is treated as an effectful computation,
-    /// where the return value of the generator corresponds to the result of the computation
-    /// and the yielded values to the effects.
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: Context) -> Poll<Self::Output, Self::Effect> {
         use GeneratorState::*;
@@ -575,7 +630,7 @@ where
                                 }
                                 Err(e) => return Effect(e),
                             },
-                            NotReady => return NotReady, // TODO: correct?
+                            NotReady => return NotReady,
                         }
                     }
                     ActiveComputation::Handler => {
@@ -602,7 +657,7 @@ where
                                 }
                             }
                             Effect(coproduct::Either::B(e)) => return Effect(e),
-                            NotReady => return NotReady, // TODO: correct?
+                            NotReady => return NotReady,
                         }
                     }
                     ActiveComputation::ValueHandler(ref mut x) => {
@@ -616,7 +671,7 @@ where
                                 }
                             }
                             Effect(e) => return Effect(e),
-                            NotReady => return NotReady, // TODO: correct?
+                            NotReady => return NotReady,
                         }
                     }
                 }

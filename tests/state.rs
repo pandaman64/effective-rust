@@ -1,9 +1,9 @@
 #![feature(generators, generator_trait, never_type)]
 
-use rich_phantoms::PhantomCovariantAlwaysSendSync;
+use std::marker::PhantomData;
 
 #[derive(Debug, Default)]
-struct GetState<T>(PhantomCovariantAlwaysSendSync<T>);
+struct GetState<T>(PhantomData<T>);
 
 impl<T> eff::Effect for GetState<T> {
     type Output = T;

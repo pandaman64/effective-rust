@@ -1,10 +1,13 @@
+//! Coproduct type of effects
+
 use super::{Effect, TypedContext};
 
-use rich_phantoms::PhantomCovariantAlwaysSendSync;
-
+/// A type corresponding to 0
 pub enum Zero {}
-pub struct Succ<T>(PhantomCovariantAlwaysSendSync<T>);
+/// A type corresponding to the next natural number of the argument
+pub struct Succ<T>(T);
 
+#[doc(hidden)]
 pub struct Wrap<T>(T);
 
 /// Hacky impl for type-level list
@@ -21,11 +24,12 @@ where
     B(Rest),
 }
 
-/// A trait for constructing a coproduct from an effect
+/// A trait for constructing a coproduct from an effect and a task context
 pub trait Inject<E, Index>
 where
     E: Effect,
 {
+    /// Construct a coproduct from an effect and a task context
     fn inject(effect: E, cx: TypedContext<E>) -> Self;
 }
 
@@ -51,7 +55,7 @@ where
     }
 }
 
-/// A trait for destructing a coproduct into an effect
+/// A trait for destructing a coproduct into an effect and a task context
 pub trait Uninject<E, Index>
 where
     E: Effect,
@@ -62,7 +66,7 @@ where
     /// Retrieve an effect and a sender from self if the type matches
     ///
     /// # Errors
-    /// If self holds an effect of a different type, this method returns an error.
+    /// If `self` holds an effect of a different type, this method returns an error
     fn uninject(self) -> Result<(E, TypedContext<E>), Self::Remainder>;
 }
 
@@ -127,9 +131,12 @@ where
     }
 }
 
+/// A trait for taking a subset effects out of `Self`
 pub trait Subset<Target, Indices> {
+    /// The other effect types
     type Remainder;
 
+    /// Take a subset of `Self`
     fn subset(self) -> Result<Target, Self::Remainder>;
 }
 
@@ -168,7 +175,7 @@ impl<F, Rest> Either<F, Rest>
 where
     F: Effect,
 {
-    /// Construct `Self` using an effect and a sender
+    /// Construct `Self` using an effect and a task context
     #[inline]
     pub fn inject<E, Index>(effect: E, cx: TypedContext<E>) -> Self
     where
@@ -178,10 +185,10 @@ where
         Inject::inject(effect, cx)
     }
 
-    /// Retrieve an effect and a sender from self if the type matches
+    /// Retrieve an effect and a task context from self if the type matches
     ///
     /// # Errors
-    /// If self holds an effect of a different type, this method returns an error.
+    /// If `self` holds an effect of a different type, this method returns an error.
     #[inline]
     pub fn uninject<E, Index>(
         self,
