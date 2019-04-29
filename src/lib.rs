@@ -26,7 +26,7 @@ pub use lazy::{lazy, pure};
 use boxed::Boxed;
 use either::Either;
 use embed::EmbedEffect;
-use handled::Handled;
+use handled::{Handled, HandlerArgument};
 
 /// A coproduct type of effects
 #[macro_export]
@@ -90,6 +90,38 @@ macro_rules! perform_from {
     }};
 }
 
+#[macro_export]
+macro_rules! handler_impl {
+    ($e:expr , ) => {{
+        let e: ! = $e;
+        e
+    }};
+    ($e:expr , $effect:pat, $k:pat => $handler:expr; $($effects:pat, $ks:pat => $handlers:expr;)*) => {{
+        match $e {
+            $crate::coproduct::Either::A($effect, $k) => $handler,
+            $crate::coproduct::Either::B(effect) => $crate::handler_impl!(effect , $($effects, $ks => $handlers;)*),
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! handler {
+    ($value:pat => $value_handler:expr $(, $effect:pat, $k:pat => $handler:expr)* $(,)?) => {{
+        #[allow(unreachable_code)]
+        |arg| $crate::from_generator(static move || {
+            if false {
+                yield unreachable!();
+            }
+            match arg {
+                $crate::handled::HandlerArgument::Done(x) => match x {
+                    $value => $value_handler,
+                },
+                $crate::handled::HandlerArgument::Effect(e) => $crate::handler_impl!(e , $($effect, $k => $handler;)*),
+            }
+        })
+    }};
+}
+
 /// An effectful computation block
 ///
 /// The block must contain `perform!` or `perform_from!`
@@ -148,17 +180,13 @@ pub trait Effectful {
     /// Takes a value handler and an effect handler and creates an effectful computation with
     /// effects handled
     #[inline]
-    fn handle<H, HC, VH, VHC, NewEffect>(
-        self,
-        value_handler: VH,
-        handler: H,
-    ) -> Handled<Self, H, HC, VH, VHC>
+    fn handle<H, HC, Effect, I>(self, handler: H) -> Handled<Self, H, HC, Effect, I>
     where
         Self: Sized,
-        VH: FnOnce(Self::Output) -> VHC,
-        H: FnMut(Self::Effect) -> Result<HC, NewEffect>,
+        H: FnMut(HandlerArgument<Self::Output, Effect>) -> HC,
+        Self::Effect: coproduct::Subset<Effect, I>,
     {
-        Handled::new(self, value_handler, handler)
+        Handled::new(self, handler)
     }
 
     /// Create an effectful computation whose effect is a superset of that of this one

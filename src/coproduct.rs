@@ -140,6 +140,15 @@ pub trait Subset<Target, Indices> {
     fn subset(self) -> Result<Target, Self::Remainder>;
 }
 
+impl Subset<!, !> for ! {
+    type Remainder = !;
+
+    #[inline]
+    fn subset(self) -> Result<!, Self::Remainder> {
+        self
+    }
+}
+
 impl<E, Rest> Subset<!, !> for Either<E, Rest>
 where
     E: Effect,
@@ -200,51 +209,22 @@ where
         Uninject::uninject(self)
     }
 
-    /// Apply a handler to one of the effect, leaving the other effects intact
-    #[inline]
-    pub fn on<Func, E, R, Index>(
-        self,
-        f: Func,
-    ) -> Result<R, <Self as Uninject<E, Index>>::Remainder>
-    where
-        Func: FnOnce(E, TypedContext<E>) -> R,
-        E: Effect,
-        Self: Uninject<E, Index>,
-    {
-        self.uninject().map(|(e, cx)| f(e, cx))
-    }
-
-    // TODO: generalize
-    /// Apply two handlers to corresponding effect types, leaving the other effects intact
-    #[inline]
-    pub fn on2<R, Func1, E1, Index1, Func2, E2, Index2>(
-        self,
-        f1: Func1,
-        f2: Func2,
-    ) -> Result<R, <<Self as Uninject<E1, Index1>>::Remainder as Uninject<E2, Index2>>::Remainder>
-    where
-        E1: Effect,
-        Func1: FnOnce(E1, TypedContext<E1>) -> R,
-        E2: Effect,
-        Func2: FnOnce(E2, TypedContext<E2>) -> R,
-        Self: Uninject<E1, Index1>,
-        <Self as Uninject<E1, Index1>>::Remainder: Uninject<E2, Index2>,
-    {
-        match self.uninject() {
-            Ok((e, cx)) => Ok(f1(e, cx)),
-            Err(e) => match e.uninject() {
-                Ok((e, cx)) => Ok(f2(e, cx)),
-                Err(e) => Err(e),
-            },
-        }
-    }
-
-    /// Embed self into the target type
+    /// Embed `self` into the target type
     #[inline]
     pub fn embed<Target, Indices>(self) -> Target
     where
         Self: Embed<Target, Indices>,
     {
         Embed::embed(self)
+    }
+
+    /// Take subset of `Self`
+    pub fn subset<Target, Indices>(
+        self,
+    ) -> Result<Target, <Self as Subset<Target, Indices>>::Remainder>
+    where
+        Self: Subset<Target, Indices>,
+    {
+        Subset::subset(self)
     }
 }

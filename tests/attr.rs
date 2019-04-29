@@ -25,28 +25,16 @@ fn foo() {
 
 #[test]
 fn test_attr() {
-    use eff::{effectful, Effectful};
+    use eff::Effectful;
 
     let e = foo();
-    e.handle(
-        |()| eff::pure(println!("done 1")).embed(),
-        |e| {
-            e.on(|Eff, k| {
-                effectful! {
-                    eff::perform!(k.resume(println!("eff")));
-                }
-            })
-        },
-    )
-    .handle(
-        |()| eff::pure(println!("done 2")),
-        |e| {
-            e.on(|hoge::Hoge, k| {
-                effectful! {
-                    eff::perform!(k.resume(println!("hoge")));
-                }
-            })
-        },
-    )
+    e.handle(eff::handler! {
+        v => v,
+        Eff, k => eff::perform!(k.resume(println!("eff"))),
+    })
+    .handle(eff::handler! {
+        v => v,
+        hoge::Hoge, k => eff::perform!(k.resume(println!("hoge"))),
+    })
     .block_on();
 }

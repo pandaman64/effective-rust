@@ -1,42 +1,49 @@
 use super::{coproduct::Either, Context, Continue, Effectful, Poll};
 
+use std::marker::PhantomData;
 use std::pin::Pin;
 
-/// An effectful computation with some effects handled
-pub struct Handled<C, H, HC, VH, VHC> {
-    source: C,
-    value_handler: Option<VH>,
-    handler: H,
-    handler_stack: Vec<Box<HC>>,
-    state: ActiveComputation<VHC>,
+#[derive(Debug)]
+pub enum HandlerArgument<T, E> {
+    Done(T),
+    Effect(E),
 }
 
-impl<C, H, HC, VH, VHC> Handled<C, H, HC, VH, VHC> {
-    pub(crate) fn new(source: C, value_handler: VH, handler: H) -> Self {
+/// An effectful computation with some effects handled
+#[derive(Debug)]
+pub struct Handled<C, H, HC, E, I> {
+    source: C,
+    handler: H,
+    handler_stack: Vec<Box<HC>>,
+    state: ActiveComputation,
+    phantom: PhantomData<(E, I)>,
+}
+
+impl<C, H, HC, E, I> Handled<C, H, HC, E, I> {
+    pub(crate) fn new(source: C, handler: H) -> Self {
         Handled {
             source,
-            value_handler: Some(value_handler),
             handler,
             handler_stack: vec![],
             state: ActiveComputation::Source,
+            phantom: PhantomData,
         }
     }
 }
 
-enum ActiveComputation<VHC> {
+#[derive(Debug)]
+enum ActiveComputation {
     Source,
     Handler,
-    ValueHandler(VHC),
 }
 
-impl<C, Output, Effect, H, HC, VH, VHC, NewOutput, NewEffect> Effectful
-    for Handled<C, H, HC, VH, VHC>
+impl<C, Output, Effect, H, HC, HandledEffect, NewOutput, NewEffect, I> Effectful
+    for Handled<C, H, HC, HandledEffect, I>
 where
     C: Effectful<Output = Output, Effect = Effect>,
-    VH: FnOnce(Output) -> VHC,
-    H: FnMut(Effect) -> Result<HC, NewEffect>,
-    VHC: Effectful<Output = NewOutput, Effect = NewEffect>,
+    H: FnMut(HandlerArgument<Output, HandledEffect>) -> HC,
     HC: Effectful<Output = NewOutput, Effect = Either<Continue<Output>, NewEffect>>,
+    Effect: super::coproduct::Subset<HandledEffect, I, Remainder = NewEffect>,
 {
     type Output = NewOutput;
     type Effect = NewEffect;
@@ -55,25 +62,22 @@ where
                     ActiveComputation::Source => {
                         match Pin::new_unchecked(&mut this.source).poll(cx) {
                             Done(v) => {
+                                this.state = ActiveComputation::Handler;
                                 if this.handler_stack.is_empty() {
-                                    this.state = ActiveComputation::ValueHandler(this
-                                        .value_handler
-                                        .take()
-                                        .expect("poll after completion")(
-                                        v
-                                    ));
+                                    let comp = (this.handler)(HandlerArgument::Done(v));
+                                    this.handler_stack.push(Box::new(comp));
                                 } else {
                                     // fulfill Continue<Output> effect
-                                    this.state = ActiveComputation::Handler;
                                     cx.set(v);
                                 }
                             }
-                            Effect(e) => match (this.handler)(e) {
-                                Ok(x) => {
-                                    this.handler_stack.push(Box::new(x));
+                            Effect(e) => match e.subset() {
+                                Ok(e) => {
                                     this.state = ActiveComputation::Handler;
+                                    let comp = (this.handler)(HandlerArgument::Effect(e));
+                                    this.handler_stack.push(Box::new(comp));
                                 }
-                                Err(e) => return Effect(e),
+                                Err(rem) => return Effect(rem),
                             },
                             NotReady => return NotReady,
                         }
@@ -102,20 +106,6 @@ where
                                 }
                             }
                             Effect(Either::B(e)) => return Effect(e),
-                            NotReady => return NotReady,
-                        }
-                    }
-                    ActiveComputation::ValueHandler(ref mut x) => {
-                        match Pin::new_unchecked(x).poll(cx) {
-                            Done(v) => {
-                                if this.handler_stack.is_empty() {
-                                    return Done(v);
-                                } else {
-                                    cx.set(v);
-                                    this.state = ActiveComputation::Handler;
-                                }
-                            }
-                            Effect(e) => return Effect(e),
                             NotReady => return NotReady,
                         }
                     }

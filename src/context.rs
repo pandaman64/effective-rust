@@ -193,9 +193,6 @@ where
 /// Panics if the thread-local task is not set
 pub fn get_task_context<'a>() -> &'a Context {
     TLS_CX
-        .with(|tls_cx| {
-            let cx = tls_cx.get().take();
-            cx
-        })
+        .with(|tls_cx| tls_cx.get().take())
         .expect("thread local context must be set")
 }

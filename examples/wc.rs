@@ -1,6 +1,6 @@
 #![feature(generators, generator_trait, never_type)]
 
-use eff::{eff, effectful, pure, Effect, Effectful};
+use eff::{eff, handler, Effect, Effectful};
 use std::cell::{Cell, RefCell};
 use std::io::Read;
 
@@ -55,20 +55,18 @@ fn main() {
 
     assert_eq!(
         count_word()
-            .handle(
-                |x| pure(x).embed(),
-                |e| e.on(|_, k| {
-                    effectful! {
-                        if s.get().len() == 0 {
-                            eff::perform!(k.resume(None))
-                        } else {
-                            let b = s.get()[0];
-                            s.set(&s.get()[1..]);
-                            eff::perform!(k.resume(Some(b)))
-                        }
+            .handle(handler! {
+                x => x,
+                NextByte, k => {
+                    if s.get().len() == 0 {
+                        eff::perform!(k.resume(None))
+                    } else {
+                        let b = s.get()[0];
+                        s.set(&s.get()[1..]);
+                        eff::perform!(k.resume(Some(b)))
                     }
-                })
-            )
+                }
+            })
             .block_on(),
         WordCount {
             bytes: 15,
@@ -85,26 +83,22 @@ fn main() {
     let buffer = &buffer;
 
     let words = count_word()
-        .handle(
-            |x| pure(x).embed(),
-            |e| {
-                e.on(|_, k| {
-                    effectful! {
-                        let mut stdin = stdin.borrow_mut();
-                        let mut buffer = buffer.borrow_mut();
-                        match stdin.read(&mut *buffer) {
-                            Ok(1) => {
-                                let b = (&mut *buffer)[0];
-                                drop(stdin);
-                                drop(buffer);
-                                eff::perform!(k.resume(Some(b)))
-                            },
-                            _ => eff::perform!(k.resume(None)),
-                        }
-                    }
-                })
-            },
-        )
+        .handle(handler! {
+            x => x,
+            NextByte, k => {
+                let mut stdin = stdin.borrow_mut();
+                let mut buffer = buffer.borrow_mut();
+                match stdin.read(&mut *buffer) {
+                    Ok(1) => {
+                        let b = (&mut *buffer)[0];
+                        drop(stdin);
+                        drop(buffer);
+                        eff::perform!(k.resume(Some(b)))
+                    },
+                    _ => eff::perform!(k.resume(None)),
+                }
+            }
+        })
         .block_on();
     println!("{:?}", words);
 }

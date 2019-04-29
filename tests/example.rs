@@ -37,40 +37,27 @@ fn test_example() {
 
     let e = effectful_computation();
     let result = e
-        .handle(
-            |x| eff::pure(x).embed(),
-            |e| {
-                e.on(|Foo(x), k| {
-                    effectful! {
-                        println!("foo");
-                        perform!(k.resume(x + 1))
-                    }
-                })
-            },
-        )
-        .handle(
-            |x| eff::pure(x).embed(),
-            |e| {
-                e.on(|Bar, k| {
-                    effectful! {
-                        println!("bar");
-                        perform!(k.resume("Hello, World!".into()))
-                    }
-                })
-            },
-        )
-        .handle(
-            |x| eff::pure(x).embed(),
-            |e| {
-                e.on(|effects::Baz, _k| {
-                    eff::lazy(|| {
-                        println!("baz");
-                        'x'
-                    })
-                    .embed()
-                })
-            },
-        )
+        .handle(handler! {
+            x => x,
+            Foo(x), k => {
+                println!("foo");
+                perform!(k.resume(x + 1))
+            }
+        })
+        .handle(handler! {
+            x => x,
+            Bar, k => {
+                println!("bar");
+                perform!(k.resume("Hello, World!".into()))
+            }
+        })
+        .handle(handler! {
+            x => x,
+            effects::Baz, _k => {
+                println!("baz");
+                'x'
+            }
+        })
         .block_on();
 
     assert_eq!(result, "Hello, World!".chars().nth(7).unwrap());

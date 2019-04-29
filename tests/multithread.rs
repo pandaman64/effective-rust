@@ -21,21 +21,19 @@ fn test_multithread() {
 
     assert_eq!(
         computation()
-            .handle(
-                |x| eff::pure(x).embed(),
-                |e| e.on(|LongComputation, k| {
-                    eff::effectful! {
-                        thread::spawn({
-                            let waker = k.waker();
-                            move || {
-                                thread::sleep(Duration::from_millis(500));
-                                waker.wake(42)
-                            }
-                        });
-                        eff::perform!(k.continuation()) + 200
-                    }
-                })
-            )
+            .handle(eff::handler! {
+                x => x,
+                LongComputation, k => {
+                    thread::spawn({
+                        let waker = k.waker();
+                        move || {
+                            thread::sleep(Duration::from_millis(500));
+                            waker.wake(42)
+                        }
+                    });
+                    eff::perform!(k.continuation()) + 200
+                }
+            })
             .block_on(),
         342,
     );

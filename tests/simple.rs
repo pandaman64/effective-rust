@@ -17,20 +17,13 @@ fn test_simple() {
 
     let e = f();
     assert_eq!(
-        e.handle(
-            |x| eff::pure(x).embed(),
-            |e| {
-                e.on(|Eff, k| {
-                    effectful! {
-                        k.waker().wake("Hello".into());
-                        perform!(k.continuation())
-
-                        // or
-                        // perform!(cx.resume("Hello".into()))
-                    }
-                })
+        e.handle(handler! {
+            x => x,
+            Eff, k => {
+                k.waker().wake("Hello".into());
+                perform!(k.continuation())
             }
-        )
+        })
         .block_on(),
         "Hello"
     );

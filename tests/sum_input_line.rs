@@ -24,17 +24,13 @@ fn sum_up(s: &str) -> usize {
     }
 
     let e = read(s);
-    e.handle(
-        |x| pure(x).embed(),
-        |e| {
-            e.on(|ConversionError(x), k| {
-                effectful! {
-                    println!("conversion error: {:?}", x);
-                    perform!(k.resume(0))
-                }
-            })
-        },
-    )
+    e.handle(handler! {
+        x => x,
+        ConversionError(x), k => {
+            println!("conversion error: {:?}", x);
+            perform!(k.resume(0))
+        }
+    })
     .block_on()
 }
 
