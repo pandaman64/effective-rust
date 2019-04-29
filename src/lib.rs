@@ -53,7 +53,7 @@ macro_rules! perform {
                     if let Some(v) = taker(&$crate::context::get_task_context()) {
                         break v;
                     } else {
-                        yield $crate::Suspension::NotReady;
+                        yield $crate::Suspension::Pending;
                     }
                 }
             }
@@ -78,8 +78,8 @@ macro_rules! perform_from {
                         $crate::Poll::Effect(e) => {
                             yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
                         }
-                        $crate::Poll::NotReady => {
-                            yield $crate::Suspension::NotReady;
+                        $crate::Poll::Pending => {
+                            yield $crate::Suspension::Pending;
                         }
                     }
                 }
@@ -88,6 +88,7 @@ macro_rules! perform_from {
     }};
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! handler_impl {
     ($e:expr , ) => {{
@@ -102,6 +103,13 @@ macro_rules! handler_impl {
     }};
 }
 
+/// Create a handler
+///
+/// The first arm corresponds to a value handler which is called upon completing the source computation.
+///
+/// The other arms handles effects performed by the source computation. Each arm takes an effect
+/// and a continuation which can wake up the task via `waker()`. See also
+/// [TypedContext](context/struct.TypedContext.html).
 #[macro_export]
 macro_rules! handler {
     ($value:pat => $value_handler:expr $(, $effect:pat, $k:pat => $handler:expr)* $(,)?) => {{
@@ -158,13 +166,13 @@ pub enum Poll<T, Effect> {
     /// An effect has been performed
     Effect(Effect),
     /// The computation is not ready to continue
-    NotReady,
+    Pending,
 }
 
 /// The cause for suspension of the computation
 pub enum Suspension<Effect> {
     Effect(Effect),
-    NotReady,
+    Pending,
 }
 
 /// An effectful computation
@@ -245,8 +253,8 @@ pub trait Effectful {
         loop {
             match this.as_mut().poll(&cx) {
                 Done(v) => return v,
-                Effect(e) => e,             // unreachable
-                NotReady => thread::park(), // park until wake
+                Effect(e) => e,            // unreachable
+                Pending => thread::park(), // park until wake
             }
         }
     }
@@ -256,9 +264,9 @@ pub trait Effectful {
     ///
     /// # Return value
     /// This function returns:
-    /// - `Poll::Done(v)` with the result `v` if the computation completed successfully
-    /// - `Poll::Effect(e)` with the effect `e` if the computation performed a computational effect
-    /// - `Poll::NotReady` if the computation is not ready to continue because a handler is handling an effect
+    /// - `Poll::Done(v)` with a result `v` if the computation completed successfully
+    /// - `Poll::Effect(e)` with an effect `e` if the computation performed a computational effect
+    /// - `Poll::Pending` if the computation is not ready to continue because a handler is handling an effect
     ///
     /// Once a computation has completed, clients should not `poll` it again
     ///

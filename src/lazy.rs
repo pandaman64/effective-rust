@@ -1,3 +1,9 @@
+//! A lazy computation with no effects.
+//!
+//! This module provides [lazy](fn.lazy.html) and [pure](fn.pure.html) function.
+//! `lazy` creates a computation with no effects that just executes the passed function.
+//! `pure` converts the given value into a pure computation.
+
 use super::{Context, Effectful, Poll};
 
 use std::pin::Pin;

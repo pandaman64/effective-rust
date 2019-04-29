@@ -1,3 +1,5 @@
+//! Either of the two underlying effectful computation
+
 use super::{Context, Effectful, Poll};
 
 use std::pin::Pin;

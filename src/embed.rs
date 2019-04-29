@@ -1,3 +1,5 @@
+//! Embed the effect of an computation into a wider one
+
 use super::{coproduct::Embed, Context, Effectful, Poll};
 
 use std::marker::PhantomData;
@@ -29,7 +31,7 @@ where
         match unsafe { self.map_unchecked_mut(|this| &mut this.0) }.poll(cx) {
             Done(v) => Done(v),
             Effect(e) => Effect(e.embed()),
-            NotReady => NotReady,
+            Pending => Pending,
         }
     }
 }

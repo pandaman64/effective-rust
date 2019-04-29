@@ -1,3 +1,5 @@
+//! An effectful computation with some effects handled
+
 use super::{coproduct::Either, Context, Continue, Effectful, Poll};
 
 use std::marker::PhantomData;
@@ -79,7 +81,7 @@ where
                                 }
                                 Err(rem) => return Effect(rem),
                             },
-                            NotReady => return NotReady,
+                            Pending => return Pending,
                         }
                     }
                     ActiveComputation::Handler => {
@@ -102,11 +104,11 @@ where
                                 // if the handler has already waken the task, continue the computation
                                 // otherwise, wait until wake() is called
                                 if !cx.contains() {
-                                    return NotReady;
+                                    return Pending;
                                 }
                             }
                             Effect(Either::B(e)) => return Effect(e),
-                            NotReady => return NotReady,
+                            Pending => return Pending,
                         }
                     }
                 }

@@ -1,3 +1,5 @@
+//! Convert a generator into an effectful computation
+
 use super::{context::set_task_context, Context, Effectful, Poll, Suspension};
 
 use std::ops::{Generator, GeneratorState};
@@ -30,7 +32,7 @@ where
             set_task_context(cx, || match Pin::new_unchecked(this).resume() {
                 Complete(v) => Done(v),
                 Yielded(Suspension::Effect(e)) => Effect(e),
-                Yielded(Suspension::NotReady) => NotReady,
+                Yielded(Suspension::Pending) => Pending,
             })
         }
     }

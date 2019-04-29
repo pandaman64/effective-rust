@@ -1,3 +1,9 @@
+//! A context for a task
+//!
+//! [TypedContext](struct.TypedContext.html) corresponds to a continuation. You can wake the task
+//! via `.waker()` and perform a special effect called [Continue](../struct.Continue.html).
+//! `Continue` effect makes the handler wait for the source computation to complete.
+
 use super::{Continue, Effect};
 
 use std::cell::Cell;
