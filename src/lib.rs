@@ -231,7 +231,7 @@ pub trait Effectful {
     ///
     /// This method blocks the current thread while waiting on the progress of the computation
     ///
-    /// The effect type of this computation must be an empty set (never typed) since there is no handler
+    /// The effect type of this computation must be an empty set (never type) since there is no handler
     #[inline]
     fn block_on(self) -> Self::Output
     where

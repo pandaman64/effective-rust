@@ -36,14 +36,14 @@ impl Context {
         }
     }
 
-    /// Returns true if the local storage task contains any value
+    /// Returns true if the task-local storage contains any value
     ///
     /// Returns false if it does not.
     pub fn contains(&self) -> bool {
         self.storage.lock().unwrap().is_some()
     }
 
-    /// Takes the value out of the local storage task
+    /// Takes the value out of the task-local storage
     pub fn take<T>(&self) -> Option<T> {
         unsafe {
             debug!(
@@ -60,7 +60,7 @@ impl Context {
         }
     }
 
-    /// Assign a value to the local storage task
+    /// Assign a value to the task-local storage
     pub fn set<T>(&self, v: T) {
         unsafe {
             debug!("Context::set: {}", type_name::<T>());
@@ -70,7 +70,7 @@ impl Context {
         }
     }
 
-    /// Create a typed context which shares the same local storage task
+    /// Create a typed context which shares the same task-local storage
     pub fn typed<E: Effect>(&self) -> TypedContext<E> {
         let ptr =
             Arc::into_raw(Arc::clone(&self.storage)) as *const Mutex<Option<NonNull<E::Output>>>;
@@ -155,7 +155,7 @@ impl<E: Effect> TypedContext<E> {
     }
 }
 
-/// Helper function for taking the output of an effect of the desired type out of the local storage task
+/// Helper function for taking the output of an effect of the desired type out of the task-local storage
 pub fn gen_taker<E>(_e: &E) -> fn(&Context) -> Option<E::Output>
 where
     E: Effect,

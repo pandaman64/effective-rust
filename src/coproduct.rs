@@ -66,7 +66,7 @@ where
     /// Retrieve an effect and a sender from self if the type matches
     ///
     /// # Errors
-    /// If `Self` holds an effect of a different type, this method returns an error
+    /// If `self` holds an effect of a different type, this method returns an error
     fn uninject(self) -> Result<(E, TypedContext<E>), Self::Remainder>;
 }
 
