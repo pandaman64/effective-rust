@@ -48,7 +48,7 @@ where
     type Output = NewOutput;
     type Effect = NewEffect;
 
-    // I'm not sure whether this inline improves the performance;
+    // I'm not sure if this inline improves performance;
     // this method is much larger than I expected
     #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {

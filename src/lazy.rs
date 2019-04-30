@@ -25,7 +25,7 @@ where
     }
 }
 
-/// Convert a thunk into a one-shot effectful computation
+/// Converts a thunk into a one-shot effectful computation
 /// This function is usually used to convert closures into an effect handler
 /// (which must be effectful)
 #[inline]
@@ -36,7 +36,7 @@ where
     Lazy(Some(v))
 }
 
-/// Convert a value into a one-shot effectful computation that immediately resolves to the value
+/// Converts a value into a one-shot effectful computation that immediately resolves to said value
 pub fn pure<T>(v: T) -> impl Effectful<Output = T, Effect = !> {
     lazy(move || v)
 }

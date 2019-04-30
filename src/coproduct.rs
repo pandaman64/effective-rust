@@ -131,12 +131,12 @@ where
     }
 }
 
-/// A trait for taking a subset effects out of `Self`
+/// A trait for taking subset effects out of `Self`
 pub trait Subset<Target, Indices> {
     /// The other effect types
     type Remainder;
 
-    /// Take a subset of `Self`
+    /// Take the subset of `Self`
     fn subset(self) -> Result<Target, Self::Remainder>;
 }
 
@@ -218,7 +218,7 @@ where
         Embed::embed(self)
     }
 
-    /// Take subset of `Self`
+    /// Take the subset of `Self`
     pub fn subset<Target, Indices>(
         self,
     ) -> Result<Target, <Self as Subset<Target, Indices>>::Remainder>

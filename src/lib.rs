@@ -65,7 +65,7 @@ macro_rules! perform {
 
 /// Runs an effectful computation under the current context
 ///
-/// When the computation performs an effect, this computation re-perform it as is
+/// When the computation performs an effect, this computation re-performs it as is
 #[macro_export]
 macro_rules! perform_from {
     ($eff:expr) => {{
@@ -153,7 +153,7 @@ impl<R> Continue<R> {
     }
 }
 
-/// A state of an effectful computation
+/// The state of an effectful computation
 pub enum Poll<T, Effect> {
     /// The computation is done
     Done(T),
@@ -163,7 +163,7 @@ pub enum Poll<T, Effect> {
     NotReady,
 }
 
-/// The cause of suspension of the computation
+/// The cause for suspension of the computation
 pub enum Suspension<Effect> {
     Effect(Effect),
     NotReady,
@@ -178,7 +178,7 @@ pub trait Effectful {
     type Effect;
 
     /// Takes a value handler and an effect handler and creates an effectful computation with
-    /// effects handled
+    /// the effects handled
     #[inline]
     fn handle<H, HC, Effect, I>(self, handler: H) -> Handled<Self, H, HC, Effect, I>
     where
@@ -189,7 +189,7 @@ pub trait Effectful {
         Handled::new(self, handler)
     }
 
-    /// Create an effectful computation whose effect is a superset of that of this one
+    /// Creates an effectful computation whose effect is a superset of that of this one
     #[inline]
     fn embed<Target, Indices>(self) -> EmbedEffect<Self, Target, Indices>
     where
@@ -227,9 +227,9 @@ pub trait Effectful {
         Boxed::new(self)
     }
 
-    /// Run this computation to completion on the current thread
+    /// Run the computation to completion on the current thread
     ///
-    /// This method blocks the current thread while waiting for the progress of the computation
+    /// This method blocks the current thread while waiting on the progress of the computation
     ///
     /// The effect type of this computation must be an empty set (never type) since there is no handler
     #[inline]
@@ -258,21 +258,21 @@ pub trait Effectful {
     ///
     /// # Return value
     /// This function returns:
-    /// - `Poll::Done(v)` with a result `v` if the computation completed successfully
-    /// - `Poll::Effect(e)` with an effect `e` if the computation performed a computational effect
+    /// - `Poll::Done(v)` with the result `v` if the computation completed successfully
+    /// - `Poll::Effect(e)` with the effect `e` if the computation performed a computational effect
     /// - `Poll::NotReady` if the computation is not ready to continue because a handler is handling an effect
     ///
     /// Once a computation has completed, clients should not `poll` it again
     ///
     /// When a computation performs an effect, `poll` returns `Poll::Effect(e)` with the effect `e`
     ///
-    /// When a handler decides to handle an effect, it will register the interest in the result for
-    /// the current task. In this case, `poll` returns `Poll::NotReady` until the task gets woken up
+    /// When a handler decides to handle an effect, it will register interest in the result for the
+    /// current task. In this case, `poll` returns `Poll::NotReady` until the task gets woken up
     /// with the outcome of the effect.
     ///
     /// # Panics
     /// After the completion of the computation (`poll` returned `Poll::Done`), future calls to `poll`
-    /// may panic, or cause any bad behavior. The `Effectful` trait does not provide any guarantees
+    /// may panic or cause bad behavior. The `Effectful` trait does not provide any guarantees
     /// about the safety of calling `poll` after the task has finished.
     fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect>;
 }
