@@ -36,14 +36,14 @@ impl Context {
         }
     }
 
-    /// Returns true if the task local storage contains any value
+    /// Returns true if the local storage task contains any value
     ///
     /// Returns false if it does not.
     pub fn contains(&self) -> bool {
         self.storage.lock().unwrap().is_some()
     }
 
-    /// Takes the value out of the task local storage
+    /// Takes the value out of the local storage task
     pub fn take<T>(&self) -> Option<T> {
         unsafe {
             debug!(
@@ -60,7 +60,7 @@ impl Context {
         }
     }
 
-    /// Assign a value to the task local storage
+    /// Assign a value to the local storage task
     pub fn set<T>(&self, v: T) {
         unsafe {
             debug!("Context::set: {}", type_name::<T>());
@@ -70,7 +70,7 @@ impl Context {
         }
     }
 
-    /// Create a typed context which shares the same task local storage
+    /// Create a typed context which shares the same local storage task
     pub fn typed<E: Effect>(&self) -> TypedContext<E> {
         let ptr =
             Arc::into_raw(Arc::clone(&self.storage)) as *const Mutex<Option<NonNull<E::Output>>>;
@@ -155,7 +155,7 @@ impl<E: Effect> TypedContext<E> {
     }
 }
 
-/// Helper function for taking the output of an effect of the desired type out of the task local storage
+/// Helper function for taking the output of an effect of the desired type out of the local storage task
 pub fn gen_taker<E>(_e: &E) -> fn(&Context) -> Option<E::Output>
 where
     E: Effect,
@@ -173,7 +173,7 @@ impl Drop for SetOnDrop {
     }
 }
 
-/// Set the thread-local task context used by generator-backed effectful computation
+/// Set the thread-local task context used by the generator-backed effectful computation
 pub fn set_task_context<F, R>(cx: &Context, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -187,7 +187,7 @@ where
     f()
 }
 
-/// Get the thread-local task context used by generator-backed effectful computation
+/// Get the thread-local task context used by the generator-backed effectful computation
 ///
 /// # Panics
 /// Panics if the thread-local task is not set
