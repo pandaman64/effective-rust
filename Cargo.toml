@@ -15,6 +15,9 @@ proc-macro-hack = "0.5.4"
 pin-utils = "0.1.0-alpha.4"
 log = "0.4.6"
 
+[dev-dependencies]
+clap = "2.33"
+
 [workspace]
 members = [
     "./",
