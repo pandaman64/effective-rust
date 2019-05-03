@@ -40,36 +40,37 @@ fn main() {
         .get_matches();
 
     let sum_comp = sum_lines("1\n2\nthree\n4\n5");
+    let handled;
 
     if matches.is_present("panic") {
-        let sum = sum_comp
+        handled = sum_comp
             .handle(handler! {
-                x => x,
+                x => Ok(x),
                 ConversionError(s), _k => panic!("not an integer: {}", s),
             })
-            .block_on();
-
-        println!("sum = {}", sum);
+            .boxed();
     } else if matches.is_present("result") {
-        let sum = sum_comp
+        handled = sum_comp
             .handle(handler! {
                 x => Ok(x),
                 ConversionError(s), _k => Err(format!("not an integer: {}", s)),
             })
-            .block_on();
-
-        println!("sum = {:?}", sum);
+            .boxed();
     } else if matches.is_present("zero") {
-        let sum = sum_comp
+        handled = sum_comp
             .handle(handler! {
-                x => x,
+                x => Ok(x),
                 ConversionError(s), k => {
                     eprintln!("not an integer: {}", s);
-                    perform!(k.resume(0))
+                    Ok(perform!(k.resume(0)))
                 }
             })
-            .block_on();
-
-        println!("sum = {}", sum);
+            .boxed();
+    } else {
+        unreachable!()
     }
+
+    let sum = handled.block_on();
+
+    println!("sum = {:?}", sum);
 }

@@ -10,7 +10,6 @@ pub use pin_utils::pin_mut;
 #[doc(hidden)]
 pub use std::pin as pin_reexport;
 
-pub mod boxed;
 pub mod context;
 pub mod coproduct;
 pub mod either;
@@ -23,7 +22,6 @@ pub use context::{Context, TypedContext};
 pub use generator::from_generator;
 pub use lazy::{lazy, pure};
 
-use boxed::Boxed;
 use either::Either;
 use embed::EmbedEffect;
 use handled::{Handled, HandlerArgument};
@@ -220,11 +218,11 @@ pub trait Effectful {
     ///
     /// This function can be used to erase `Self` type
     #[inline]
-    fn boxed<'a>(self) -> Boxed<'a, Self::Output, Self::Effect>
+    fn boxed<'a>(self) -> Pin<Box<dyn Effectful<Output = Self::Output, Effect = Self::Effect> + 'a>>
     where
         Self: Sized + 'a,
     {
-        Boxed::new(self)
+        Box::pin(self)
     }
 
     /// Run the computation to completion on the current thread
@@ -275,4 +273,28 @@ pub trait Effectful {
     /// may panic or cause bad behavior. The `Effectful` trait does not provide any guarantees
     /// about the safety of calling `poll` after the task has finished.
     fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect>;
+}
+
+impl<C> Effectful for Pin<&'_ mut C>
+where
+    C: Effectful + ?Sized,
+{
+    type Output = C::Output;
+    type Effect = C::Effect;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
+        C::poll((*self).as_mut(), cx)
+    }
+}
+
+impl<C> Effectful for Pin<Box<C>>
+where
+    C: Effectful + ?Sized,
+{
+    type Output = C::Output;
+    type Effect = C::Effect;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
+        C::poll((*self).as_mut(), cx)
+    }
 }
