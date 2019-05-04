@@ -2,13 +2,13 @@
 
 use eff::{eff, handler, perform, Effect, Effectful};
 
-struct ConversionError<'a>(&'a str);
+struct NotAnInteger<'a>(&'a str);
 
-impl Effect for ConversionError<'_> {
+impl Effect for NotAnInteger<'_> {
     type Output = usize;
 }
 
-#[eff(ConversionError)]
+#[eff(NotAnInteger)]
 fn sum_lines(s: &str) -> usize {
     let lines = s.split('\n');
     let mut sum = 0;
@@ -16,7 +16,7 @@ fn sum_lines(s: &str) -> usize {
     for line in lines {
         match line.parse::<usize>() {
             Ok(x) => sum += x,
-            Err(_e) => sum += perform!(ConversionError(line)),
+            Err(_e) => sum += perform!(NotAnInteger(line)),
         }
     }
 
@@ -46,21 +46,21 @@ fn main() {
         handled = sum_comp
             .handle(handler! {
                 x => Ok(x),
-                ConversionError(s), _k => panic!("not an integer: {}", s),
+                NotAnInteger(s), _k => panic!("not an integer: {}", s),
             })
             .boxed();
     } else if matches.is_present("result") {
         handled = sum_comp
             .handle(handler! {
                 x => Ok(x),
-                ConversionError(s), _k => Err(format!("not an integer: {}", s)),
+                NotAnInteger(s), _k => Err(format!("not an integer: {}", s)),
             })
             .boxed();
     } else if matches.is_present("zero") {
         handled = sum_comp
             .handle(handler! {
                 x => Ok(x),
-                ConversionError(s), k => {
+                NotAnInteger(s), k => {
                     eprintln!("not an integer: {}", s);
                     Ok(perform!(k.resume(0)))
                 }
