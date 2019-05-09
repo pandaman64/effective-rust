@@ -14,7 +14,7 @@ pub enum HandlerArgument<T, E> {
 /// An effectful computation with some effects handled
 #[derive(Debug)]
 pub struct Handled<C, H, HC, E, I> {
-    source: C,
+    source: Option<C>,
     handler: H,
     handler_stack: Vec<Box<HC>>,
     state: ActiveComputation,
@@ -24,7 +24,7 @@ pub struct Handled<C, H, HC, E, I> {
 impl<C, H, HC, E, I> Handled<C, H, HC, E, I> {
     pub(crate) fn new(source: C, handler: H) -> Self {
         Handled {
-            source,
+            source: Some(source),
             handler,
             handler_stack: vec![],
             state: ActiveComputation::Source,
@@ -62,8 +62,13 @@ where
             loop {
                 match &mut this.state {
                     ActiveComputation::Source => {
-                        match Pin::new_unchecked(&mut this.source).poll(cx) {
+                        match Pin::new_unchecked(
+                            this.source.as_mut().expect("poll after completion"),
+                        )
+                        .poll(cx)
+                        {
                             Done(v) => {
+                                this.source = None;
                                 this.state = ActiveComputation::Handler;
                                 if this.handler_stack.is_empty() {
                                     let comp = (this.handler)(HandlerArgument::Done(v));
