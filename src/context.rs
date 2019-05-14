@@ -7,12 +7,15 @@
 use super::{Continue, Effect};
 
 use std::cell::Cell;
+use std::fmt;
 use std::intrinsics::type_name;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, Thread};
 
+use crate::{Effectful, Poll};
 use log::debug;
+use std::pin::Pin;
 
 thread_local! {
     static TLS_CX: Cell<Option<&'static Context>> = Cell::new(None);
@@ -95,6 +98,18 @@ pub struct Waker<E: Effect> {
     thread: Thread,
 }
 
+impl<E: Effect> fmt::Debug for Waker<E>
+where
+    E::Output: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Waker")
+            .field("storage", &self.storage)
+            .field("thread", &self.thread)
+            .finish()
+    }
+}
+
 impl<E: Effect> Clone for Waker<E> {
     fn clone(&self) -> Self {
         Self {
@@ -141,6 +156,15 @@ where
 
 /// The typed context of an computation
 pub struct TypedContext<E: Effect>(Waker<E>);
+
+impl<E: Effect> fmt::Debug for TypedContext<E>
+where
+    E::Output: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("TypedContext").field(&self.0).finish()
+    }
+}
 
 impl<E: Effect> TypedContext<E> {
     pub fn waker(&self) -> Waker<E> {
@@ -201,4 +225,12 @@ pub fn get_task_context<'a>() -> &'a Context {
     TLS_CX
         .with(|tls_cx| tls_cx.get().take())
         .expect("thread local context must be set")
+}
+
+/// Poll the given computation with the thread-local task context
+///
+/// # Panics
+/// Panics if the thread-local task is not set
+pub fn poll_with_task_context<C: Effectful>(comp: Pin<&mut C>) -> Poll<C::Output, C::Effect> {
+    comp.poll(get_task_context())
 }

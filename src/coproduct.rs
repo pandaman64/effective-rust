@@ -1,6 +1,7 @@
 //! Coproduct type of effects
 
 use super::{Effect, TypedContext};
+use std::fmt;
 
 /// A type corresponding to 0
 pub enum Zero {}
@@ -22,6 +23,20 @@ where
 {
     A(E, TypedContext<E>),
     B(Rest),
+}
+
+impl<E, Rest> fmt::Debug for Either<E, Rest>
+where
+    E: Effect + fmt::Debug,
+    E::Output: fmt::Debug,
+    Rest: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Either::A(e, cx) => f.debug_tuple("A").field(e).field(cx).finish(),
+            Either::B(rest) => f.debug_tuple("B").field(rest).finish(),
+        }
+    }
 }
 
 /// A trait for constructing a coproduct from an effect and a task context

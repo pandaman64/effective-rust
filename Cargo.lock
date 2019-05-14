@@ -44,7 +44,7 @@ dependencies = [
 
 [[package]]
 name = "eff"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "eff-attr 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -56,6 +56,7 @@ dependencies = [
 [[package]]
 name = "eff-attr"
 version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "proc-macro-hack 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro2 0.4.28 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -65,8 +66,7 @@ dependencies = [
 
 [[package]]
 name = "eff-attr"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "0.0.7"
 dependencies = [
  "proc-macro-hack 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro2 0.4.28 (registry+https://github.com/rust-lang/crates.io-index)",

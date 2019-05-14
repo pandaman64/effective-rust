@@ -70,10 +70,9 @@ macro_rules! perform_from {
         match $eff {
             eff => {
                 $crate::pin_mut!(eff);
-                let cx = $crate::context::get_task_context();
                 loop {
                     let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
-                    match $crate::Effectful::poll(eff, cx) {
+                    match $crate::context::poll_with_task_context(eff) {
                         $crate::Poll::Done(x) => break x,
                         $crate::Poll::Effect(e) => {
                             yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
@@ -83,6 +82,21 @@ macro_rules! perform_from {
                         }
                     }
                 }
+            }
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! await_poll {
+    ($pinned_comp:expr) => {{
+        loop {
+            match $crate::context::poll_with_task_context($crate::pin_reexport::Pin::as_mut(
+                $pinned_comp,
+            )) {
+                $crate::Poll::Done(x) => break $crate::handled::HandlerArgument::Done(x),
+                $crate::Poll::Effect(e) => break $crate::handled::HandlerArgument::Effect(e),
+                $crate::Poll::Pending => yield $crate::Suspension::Pending,
             }
         }
     }};
@@ -160,6 +174,7 @@ impl<R> Continue<R> {
 }
 
 /// The state of an effectful computation
+#[derive(Debug)]
 pub enum Poll<T, Effect> {
     /// The computation is done
     Done(T),
@@ -170,6 +185,7 @@ pub enum Poll<T, Effect> {
 }
 
 /// The cause for suspension of the computation
+#[derive(Debug)]
 pub enum Suspension<Effect> {
     Effect(Effect),
     Pending,
