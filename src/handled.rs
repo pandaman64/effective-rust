@@ -2,9 +2,9 @@
 
 use super::{coproduct::Either, AwaitedPoll, Context, Continue, Effectful, Poll, Waker};
 
+use std::fmt;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::fmt;
 
 struct Handler<HC: Effectful> {
     computation: Pin<Box<HC>>,
@@ -23,7 +23,6 @@ where
             .finish()
     }
 }
-
 
 impl<HC: Effectful> Handler<HC> {
     fn new(computation: HC) -> Self {

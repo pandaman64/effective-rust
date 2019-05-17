@@ -4,6 +4,7 @@ use eff::coproduct::Either::A;
 use eff::*;
 use pin_utils::pin_mut;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Send<T>(T);
@@ -71,7 +72,13 @@ fn test_pipe() {
     let pipe = pipe(tx, rx);
     pin_mut!(pipe);
 
-    let context = Context::current();
+    struct DoNothingNotify;
+
+    impl Notify for DoNothingNotify {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    let context = Context::from_notify(Arc::new(DoNothingNotify));
 
     match pipe.poll(&context) {
         Poll::Done(10) => {}

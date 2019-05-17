@@ -9,7 +9,6 @@ use super::{Continue, Effect};
 use std::cell::Cell;
 use std::fmt;
 use std::sync::{Arc, Mutex};
-use std::thread::{self, Thread};
 
 use crate::{Effectful, Poll};
 use std::pin::Pin;
@@ -19,21 +18,14 @@ thread_local! {
 }
 
 /// The untyped context of an effectful computation
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct Context {
-    thread: Thread,
+    notify: Arc<dyn Notify>,
 }
 
-// raw pointer is just an untyped box, so we can implement Send and Sync (really?)
-unsafe impl Send for Context {}
-unsafe impl Sync for Context {}
-
 impl Context {
-    /// Create a context within the current thread
-    pub fn current() -> Self {
-        Context {
-            thread: thread::current(),
-        }
+    pub fn from_notify(notify: Arc<dyn Notify>) -> Self {
+        Context { notify }
     }
 }
 
@@ -66,10 +58,14 @@ impl<T> Storage<T> {
     }
 }
 
+pub trait Notify: Send + Sync {
+    fn wake(self: Arc<Self>);
+}
+
 /// The waker of the task
 pub struct Waker<E: Effect> {
     storage: Storage<E::Output>,
-    thread: Thread,
+    notify: Arc<dyn Notify>,
 }
 
 impl<E: Effect> fmt::Debug for Waker<E>
@@ -79,7 +75,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Waker")
             .field("storage", &self.storage)
-            .field("thread", &self.thread)
+            .field("notify", &"<...>")
             .finish()
     }
 }
@@ -88,14 +84,14 @@ impl<E: Effect> Clone for Waker<E> {
     fn clone(&self) -> Self {
         Self {
             storage: self.storage.clone(),
-            thread: self.thread.clone(),
+            notify: Arc::clone(&self.notify),
         }
     }
 }
 
 impl<E: Effect> Waker<E> {
-    fn new(storage: Storage<E::Output>, thread: Thread) -> Self {
-        Self { storage, thread }
+    fn new(storage: Storage<E::Output>, notify: Arc<dyn Notify>) -> Self {
+        Self { storage, notify }
     }
 
     /// Wake up the task associated with this context
@@ -103,8 +99,8 @@ impl<E: Effect> Waker<E> {
         // set handler result
         self.storage.set(v);
 
-        // unpark task thread
-        self.thread.unpark()
+        // wake up the task
+        Arc::clone(&self.notify).wake();
     }
 }
 
@@ -124,7 +120,7 @@ where
 
 pub fn channel<E: Effect>(cx: &Context) -> (TypedContext<E>, Storage<E::Output>) {
     let storage = Storage::new();
-    let waker = Waker::new(storage.clone(), cx.thread.clone());
+    let waker = Waker::new(storage.clone(), Arc::clone(&cx.notify));
     (TypedContext(waker), storage)
 }
 

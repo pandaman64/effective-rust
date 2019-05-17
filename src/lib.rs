@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::thread;
 
 pub use eff_attr::eff;
@@ -14,11 +15,12 @@ pub mod context;
 pub mod coproduct;
 pub mod either;
 pub mod embed;
+pub mod future;
 pub mod generator;
 pub mod handled;
 pub mod lazy;
 
-pub use context::{Context, TypedContext, Waker};
+pub use context::{Context, Notify, TypedContext, Waker};
 pub use generator::from_generator;
 pub use lazy::{lazy, pure};
 
@@ -267,6 +269,14 @@ pub trait Effectful {
         self
     }
 
+    #[inline]
+    fn into_future(self) -> future::IntoFuture<Self>
+    where
+        Self: Effectful<Effect = !> + Sized,
+    {
+        future::IntoFuture(self)
+    }
+
     /// Run the computation to completion on the current thread
     ///
     /// This method blocks the current thread while waiting on the progress of the computation
@@ -279,10 +289,22 @@ pub trait Effectful {
     {
         use Poll::*;
 
+        struct CurrentThreadNotify {
+            thread: thread::Thread,
+        }
+
+        impl Notify for CurrentThreadNotify {
+            fn wake(self: Arc<Self>) {
+                self.thread.unpark();
+            }
+        }
+
         let this = self;
         pin_mut!(this);
 
-        let cx = Context::current();
+        let cx = Context::from_notify(Arc::new(CurrentThreadNotify {
+            thread: thread::current(),
+        }));
 
         loop {
             match this.as_mut().poll(&cx) {
@@ -345,7 +367,7 @@ where
 
 impl<C> Effectful for Box<C>
 where
-    C: Effectful + Unpin + ?Sized
+    C: Effectful + Unpin + ?Sized,
 {
     type Output = C::Output;
     type Effect = C::Effect;
