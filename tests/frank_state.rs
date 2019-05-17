@@ -1,8 +1,10 @@
 #![feature(generators, never_type)]
 
-use context::poll_with_task_context;
-use coproduct::Either::{A, B};
-use eff::*;
+use eff::{
+    context::poll_with_task_context,
+    coproduct::Either::{A, B},
+    *,
+};
 use pin_utils::pin_mut;
 use std::marker::PhantomData;
 
@@ -36,7 +38,9 @@ fn run_state<S: Clone, T>(
     loop {
         match poll_with_task_context(comp.as_mut()) {
             Poll::Done(x) => return (init, x),
-            Poll::Effect(A(Get(_), cx)) => cx.waker().wake(init.clone()),
+            Poll::Effect(A(Get(_), cx)) => {
+                cx.waker().wake(init.clone());
+            }
             Poll::Effect(B(A(Set(v), cx))) => {
                 init = v;
                 cx.waker().wake(());

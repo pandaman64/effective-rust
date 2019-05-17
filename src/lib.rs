@@ -1,4 +1,4 @@
-#![feature(generator_trait, never_type, core_intrinsics, extern_types)]
+#![feature(generator_trait, never_type)]
 
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -18,13 +18,13 @@ pub mod generator;
 pub mod handled;
 pub mod lazy;
 
-pub use context::{Context, TypedContext};
+pub use context::{Context, TypedContext, Waker};
 pub use generator::from_generator;
 pub use lazy::{lazy, pure};
 
 use either::Either;
 use embed::EmbedEffect;
-use handled::{Handled, HandlerArgument};
+use handled::Handled;
 
 /// A coproduct type of effects
 #[macro_export]
@@ -43,14 +43,11 @@ macro_rules! perform {
     ($eff:expr) => {{
         match $eff {
             eff => {
-                let taker = $crate::context::gen_taker(&eff);
                 let cx = $crate::context::get_task_context();
-                yield $crate::Suspension::Effect($crate::coproduct::Inject::inject(
-                    eff,
-                    cx.typed(),
-                ));
+                let (waker, receiver) = $crate::context::channel(cx);
+                yield $crate::Suspension::Effect($crate::coproduct::Inject::inject(eff, waker));
                 loop {
-                    if let Some(v) = taker(&$crate::context::get_task_context()) {
+                    if let Some(v) = receiver.try_take() {
                         break v;
                     } else {
                         yield $crate::Suspension::Pending;
@@ -91,11 +88,9 @@ macro_rules! perform_from {
 macro_rules! await_poll {
     ($pinned_comp:expr) => {{
         loop {
-            match $crate::context::poll_with_task_context($crate::pin_reexport::Pin::as_mut(
-                $pinned_comp,
-            )) {
-                $crate::Poll::Done(x) => break $crate::handled::HandlerArgument::Done(x),
-                $crate::Poll::Effect(e) => break $crate::handled::HandlerArgument::Effect(e),
+            match $crate::context::poll_with_task_context($pinned_comp) {
+                $crate::Poll::Done(x) => break $crate::AwaitedPoll::Done(x),
+                $crate::Poll::Effect(e) => break $crate::AwaitedPoll::Effect(e),
                 $crate::Poll::Pending => yield $crate::Suspension::Pending,
             }
         }
@@ -133,10 +128,10 @@ macro_rules! handler {
                 yield unreachable!();
             }
             match arg {
-                $crate::handled::HandlerArgument::Done(x) => match x {
+                $crate::AwaitedPoll::Done(x) => match x {
                     $value => $value_handler,
                 },
-                $crate::handled::HandlerArgument::Effect(e) => $crate::handler_impl!(e , $($effect, $k => $handler;)*),
+                $crate::AwaitedPoll::Effect(e) => $crate::handler_impl!(e , $($effect, $k => $handler;)*),
             }
         })
     }};
@@ -184,6 +179,12 @@ pub enum Poll<T, Effect> {
     Pending,
 }
 
+#[derive(Debug)]
+pub enum AwaitedPoll<T, Effect> {
+    Done(T),
+    Effect(Effect),
+}
+
 /// The cause for suspension of the computation
 #[derive(Debug)]
 pub enum Suspension<Effect> {
@@ -205,7 +206,8 @@ pub trait Effectful {
     fn handle<H, HC, Effect, I>(self, handler: H) -> Handled<Self, H, HC, Effect, I>
     where
         Self: Sized,
-        H: FnMut(HandlerArgument<Self::Output, Effect>) -> HC,
+        HC: Effectful,
+        H: FnMut(AwaitedPoll<Self::Output, Effect>) -> HC,
         Self::Effect: coproduct::Subset<Effect, I>,
     {
         Handled::new(self, handler)
@@ -247,6 +249,22 @@ pub trait Effectful {
         Self: Sized + 'a,
     {
         Box::pin(self)
+    }
+
+    #[inline]
+    fn output<T>(self) -> Self
+    where
+        Self: Effectful<Output = T> + Sized,
+    {
+        self
+    }
+
+    #[inline]
+    fn effect<E>(self) -> Self
+    where
+        Self: Effectful<Effect = E> + Sized,
+    {
+        self
     }
 
     /// Run the computation to completion on the current thread
@@ -299,6 +317,19 @@ pub trait Effectful {
     fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect>;
 }
 
+impl<C> Effectful for &'_ mut C
+where
+    C: Effectful + Unpin + ?Sized,
+{
+    type Output = C::Output;
+    type Effect = C::Effect;
+
+    #[inline]
+    fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
+        C::poll(Pin::new(&mut **self), cx)
+    }
+}
+
 impl<C> Effectful for Pin<&'_ mut C>
 where
     C: Effectful + ?Sized,
@@ -306,8 +337,22 @@ where
     type Output = C::Output;
     type Effect = C::Effect;
 
+    #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         C::poll((*self).as_mut(), cx)
+    }
+}
+
+impl<C> Effectful for Box<C>
+where
+    C: Effectful + Unpin + ?Sized
+{
+    type Output = C::Output;
+    type Effect = C::Effect;
+
+    #[inline]
+    fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
+        C::poll(Pin::new(&mut **self), cx)
     }
 }
 
@@ -317,7 +362,7 @@ where
 {
     type Output = C::Output;
     type Effect = C::Effect;
-
+    #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         C::poll((*self).as_mut(), cx)
     }

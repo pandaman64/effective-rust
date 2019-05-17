@@ -25,8 +25,8 @@ where
     #[inline]
     fn poll(self: Pin<&mut Self>, _cx: &Context) -> Poll<Self::Output, Self::Effect> {
         unsafe {
-            let this = self.get_unchecked_mut();
-            Poll::Done(this.0.take().expect("poll after completion")())
+            let f = &mut self.get_unchecked_mut().0;
+            Poll::Done(f.take().expect("poll after completion")())
         }
     }
 }

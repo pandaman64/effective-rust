@@ -1,6 +1,6 @@
 #![feature(generators, never_type)]
 
-use eff::context::get_task_context;
+use eff::coproduct::Either::A;
 use eff::*;
 use pin_utils::pin_mut;
 use std::marker::PhantomData;
@@ -31,29 +31,24 @@ fn pipe<T, U>(
     tx: impl Effectful<Effect = Coproduct![Send<T>], Output = ()>,
     rx: impl Effectful<Effect = Coproduct![Receive<T>], Output = U>,
 ) -> U {
-    use handled::HandlerArgument::*;
+    use AwaitedPoll::*;
 
     pin_mut!(tx);
     pin_mut!(rx);
 
-    let mut s = await_poll!(&mut tx);
-    let mut r = await_poll!(&mut rx);
-
     loop {
-        let (send, receive) = match (s, r) {
-            (
-                Effect(coproduct::Either::A(Send(v), _)),
-                Effect(coproduct::Either::A(Receive(_), _)),
-            ) => ((), v),
-            (Effect(_), Effect(_)) => unreachable!(),
-            (_, Done(v)) => return v,
-            (Done(()), _) => perform!(Abort),
-        };
+        let send = await_poll!(tx.as_mut());
+        let recv = await_poll!(rx.as_mut());
 
-        get_task_context().set(send);
-        s = await_poll!(&mut tx);
-        get_task_context().set(receive);
-        r = await_poll!(&mut rx);
+        match (send, recv) {
+            (Effect(A(Send(msg), send)), Effect(A(Receive(_), recv))) => {
+                send.waker().wake(());
+                recv.waker().wake(msg);
+            }
+            (Effect(_), Effect(_)) => unreachable!(), // Rust can't prove this arm is unreachable
+            (_, Done(v)) => return v,
+            (Done(()), Effect(_)) => perform!(Abort),
+        }
     }
 }
 

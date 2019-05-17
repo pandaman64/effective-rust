@@ -1,6 +1,6 @@
 [package]
 name = "eff"
-version = "0.0.7"
+version = "0.0.8"
 authors = ["pan"]
 edition = "2018"
 
@@ -13,7 +13,6 @@ readme = "README.md"
 eff-attr = "0.0.6"
 proc-macro-hack = "0.5.4"
 pin-utils = "0.1.0-alpha.4"
-log = "0.4.6"
 
 [dev-dependencies]
 clap = "2.33"

@@ -1,27 +1,69 @@
 //! An effectful computation with some effects handled
 
-use super::{coproduct::Either, Context, Continue, Effectful, Poll};
+use super::{coproduct::Either, AwaitedPoll, Context, Continue, Effectful, Poll, Waker};
 
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::fmt;
 
-#[derive(Debug)]
-pub enum HandlerArgument<T, E> {
-    Done(T),
-    Effect(E),
+struct Handler<HC: Effectful> {
+    computation: Pin<Box<HC>>,
+    waker: Option<Waker<Continue<HC::Output>>>,
+}
+
+impl<HC> fmt::Debug for Handler<HC>
+where
+    HC: Effectful + fmt::Debug,
+    HC::Output: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Handler")
+            .field("computation", &self.computation)
+            .field("waker", &self.waker)
+            .finish()
+    }
+}
+
+
+impl<HC: Effectful> Handler<HC> {
+    fn new(computation: HC) -> Self {
+        Self {
+            computation: Box::pin(computation),
+            waker: None,
+        }
+    }
 }
 
 /// An effectful computation with some effects handled
-#[derive(Debug)]
-pub struct Handled<C, H, HC, E, I> {
+pub struct Handled<C, H, HC, E, I>
+where
+    HC: Effectful,
+{
     source: Option<C>,
     handler: H,
-    handler_stack: Vec<Box<HC>>,
+    handler_stack: Vec<Handler<HC>>,
     state: ActiveComputation,
     phantom: PhantomData<(E, I)>,
 }
 
-impl<C, H, HC, E, I> Handled<C, H, HC, E, I> {
+impl<C, H, HC, E, I> fmt::Debug for Handled<C, H, HC, E, I>
+where
+    C: fmt::Debug,
+    H: fmt::Debug,
+    HC: Effectful + fmt::Debug,
+    HC::Output: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Handled")
+            .field("source", &self.source)
+            .field("handler", &self.handler)
+            .field("handler stack", &self.handler_stack)
+            .field("state", &self.state)
+            .finish()
+    }
+}
+
+impl<C, H, HC: Effectful, E, I> Handled<C, H, HC, E, I> {
     pub(crate) fn new(source: C, handler: H) -> Self {
         Handled {
             source: Some(source),
@@ -43,8 +85,8 @@ impl<C, Output, Effect, H, HC, HandledEffect, NewOutput, NewEffect, I> Effectful
     for Handled<C, H, HC, HandledEffect, I>
 where
     C: Effectful<Output = Output, Effect = Effect>,
-    H: FnMut(HandlerArgument<Output, HandledEffect>) -> HC,
-    HC: Effectful<Output = NewOutput, Effect = Either<Continue<Output>, NewEffect>>,
+    H: FnMut(AwaitedPoll<Output, HandledEffect>) -> HC,
+    HC: Effectful<Output = NewOutput, Effect = Either<Continue<NewOutput>, NewEffect>>,
     Effect: super::coproduct::Subset<HandledEffect, I, Remainder = NewEffect>,
 {
     type Output = NewOutput;
@@ -70,19 +112,17 @@ where
                             Done(v) => {
                                 this.source = None;
                                 this.state = ActiveComputation::Handler;
-                                if this.handler_stack.is_empty() {
-                                    let comp = (this.handler)(HandlerArgument::Done(v));
-                                    this.handler_stack.push(Box::new(comp));
-                                } else {
-                                    // fulfill Continue<Output> effect
-                                    cx.set(v);
-                                }
+
+                                // TODO: what if this.handler panics?
+                                let comp = (this.handler)(AwaitedPoll::Done(v));
+                                this.handler_stack.push(Handler::new(comp));
                             }
                             Effect(e) => match e.subset() {
                                 Ok(e) => {
                                     this.state = ActiveComputation::Handler;
-                                    let comp = (this.handler)(HandlerArgument::Effect(e));
-                                    this.handler_stack.push(Box::new(comp));
+                                    // TODO: what if this.handler panics?
+                                    let comp = (this.handler)(AwaitedPoll::Effect(e));
+                                    this.handler_stack.push(Handler::new(comp));
                                 }
                                 Err(rem) => return Effect(rem),
                             },
@@ -90,8 +130,8 @@ where
                         }
                     }
                     ActiveComputation::Handler => {
-                        let handler = this.handler_stack.last_mut().unwrap();
-                        match Pin::new_unchecked(&mut **handler).poll(cx) {
+                        let handler = &mut this.handler_stack.last_mut().unwrap().computation;
+                        match handler.as_mut().poll(cx) {
                             Done(v) => {
                                 this.handler_stack.pop();
 
@@ -99,18 +139,17 @@ where
                                 if this.handler_stack.is_empty() {
                                     return Done(v);
                                 } else {
-                                    cx.set(v);
+                                    (this.handler_stack.last_mut().unwrap().waker)
+                                        .take()
+                                        .unwrap()
+                                        .wake(v);
                                 }
                             }
-                            Effect(Either::A(_, _)) => {
+                            Effect(Either::A(_, cx)) => {
                                 // continue the original computation
                                 this.state = ActiveComputation::Source;
 
-                                // if the handler has already waken the task, continue the computation
-                                // otherwise, wait until wake() is called
-                                if !cx.contains() {
-                                    return Pending;
-                                }
+                                this.handler_stack.last_mut().unwrap().waker = Some(cx.waker());
                             }
                             Effect(Either::B(e)) => return Effect(e),
                             Pending => return Pending,

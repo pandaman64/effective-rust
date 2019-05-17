@@ -62,7 +62,7 @@ fn main() {
                 x => Ok(x),
                 NotAnInteger(s), k => {
                     eprintln!("not an integer: {}", s);
-                    Ok(perform!(k.resume(0)))
+                    perform!(k.resume(0))
                 }
             })
             .boxed();

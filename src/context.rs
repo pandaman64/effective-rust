@@ -8,27 +8,19 @@ use super::{Continue, Effect};
 
 use std::cell::Cell;
 use std::fmt;
-use std::intrinsics::type_name;
-use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, Thread};
 
 use crate::{Effectful, Poll};
-use log::debug;
 use std::pin::Pin;
 
 thread_local! {
     static TLS_CX: Cell<Option<&'static Context>> = Cell::new(None);
 }
 
-extern "Rust" {
-    type Whatever;
-}
-
 /// The untyped context of an effectful computation
 #[derive(Debug)]
 pub struct Context {
-    storage: Arc<Mutex<Option<NonNull<Whatever>>>>,
     thread: Thread,
 }
 
@@ -40,61 +32,43 @@ impl Context {
     /// Create a context within the current thread
     pub fn current() -> Self {
         Context {
-            storage: Arc::new(Mutex::new(None)),
             thread: thread::current(),
         }
     }
+}
 
-    /// Returns true if the task-local storage contains any value
-    ///
-    /// Returns false if it does not.
-    pub fn contains(&self) -> bool {
-        self.storage.lock().unwrap().is_some()
+#[derive(Debug)]
+pub struct Storage<T> {
+    value: Arc<Mutex<Option<T>>>,
+}
+
+impl<T> Clone for Storage<T> {
+    fn clone(&self) -> Self {
+        Self {
+            value: Arc::clone(&self.value),
+        }
     }
+}
 
-    /// Takes the value out of the task-local storage
-    pub fn take<T>(&self) -> Option<T> {
-        unsafe {
-            debug!(
-                "Context::get: {}, from {:?}",
-                type_name::<T>(),
-                self.storage
-            );
-
-            self.storage
-                .lock()
-                .unwrap()
-                .take()
-                .map(|non_null| *(Box::from_raw(non_null.as_ptr() as *mut T)))
+impl<T> Storage<T> {
+    fn new() -> Self {
+        Storage {
+            value: Default::default(),
         }
     }
 
-    /// Assign a value to the task-local storage
-    pub fn set<T>(&self, v: T) {
-        unsafe {
-            debug!("Context::set: {}", type_name::<T>());
-            *self.storage.lock().unwrap() = Some(NonNull::new_unchecked(
-                Box::into_raw(Box::new(v)) as *mut Whatever,
-            ));
-        }
+    pub fn try_take(&self) -> Option<T> {
+        self.value.try_lock().ok()?.take()
     }
 
-    /// Create a typed context which shares the same task-local storage
-    pub fn typed<E: Effect>(&self) -> TypedContext<E> {
-        let ptr =
-            Arc::into_raw(Arc::clone(&self.storage)) as *const Mutex<Option<NonNull<E::Output>>>;
-        unsafe {
-            TypedContext(Waker {
-                storage: Arc::from_raw(ptr),
-                thread: self.thread.clone(),
-            })
-        }
+    pub fn set(&self, v: T) {
+        *self.value.lock().unwrap() = Some(v);
     }
 }
 
 /// The waker of the task
 pub struct Waker<E: Effect> {
-    storage: Arc<Mutex<Option<NonNull<E::Output>>>>,
+    storage: Storage<E::Output>,
     thread: Thread,
 }
 
@@ -113,27 +87,21 @@ where
 impl<E: Effect> Clone for Waker<E> {
     fn clone(&self) -> Self {
         Self {
-            storage: Arc::clone(&self.storage),
+            storage: self.storage.clone(),
             thread: self.thread.clone(),
         }
     }
 }
 
 impl<E: Effect> Waker<E> {
+    fn new(storage: Storage<E::Output>, thread: Thread) -> Self {
+        Self { storage, thread }
+    }
+
     /// Wake up the task associated with this context
     pub fn wake(&self, v: E::Output) {
         // set handler result
-        unsafe {
-            debug!(
-                "Waker::set: {} -> {}, to: {:?}",
-                type_name::<E>(),
-                type_name::<E::Output>(),
-                self.storage,
-            );
-            *self.storage.lock().unwrap() = Some(NonNull::new_unchecked(
-                Box::into_raw(Box::new(v)) as *mut E::Output,
-            ));
-        }
+        self.storage.set(v);
 
         // unpark task thread
         self.thread.unpark()
@@ -152,6 +120,12 @@ where
     E: Effect,
     E::Output: Sync,
 {
+}
+
+pub fn channel<E: Effect>(cx: &Context) -> (TypedContext<E>, Storage<E::Output>) {
+    let storage = Storage::new();
+    let waker = Waker::new(storage.clone(), cx.thread.clone());
+    (TypedContext(waker), storage)
 }
 
 /// The typed context of an computation
@@ -185,17 +159,9 @@ impl<E: Effect> TypedContext<E> {
     }
 }
 
-/// Helper function for taking the output of an effect of the desired type out of the task-local storage
-pub fn gen_taker<E>(_e: &E) -> fn(&Context) -> Option<E::Output>
-where
-    E: Effect,
-{
-    Context::take::<E::Output>
-}
+struct SetContextOnDrop(Option<&'static Context>);
 
-struct SetOnDrop(Option<&'static Context>);
-
-impl Drop for SetOnDrop {
+impl Drop for SetContextOnDrop {
     fn drop(&mut self) {
         TLS_CX.with(|tls_cx| {
             tls_cx.replace(self.0.take());
@@ -213,7 +179,8 @@ where
             &*(cx as *const Context) as &'static Context
         }))
     });
-    let _reset = SetOnDrop(old_cx);
+    let _reset_cx = SetContextOnDrop(old_cx);
+
     f()
 }
 
