@@ -32,8 +32,6 @@ where
 }
 
 /// Converts a thunk into a one-shot effectful computation
-/// This function is usually used to convert closures into an effect handler
-/// (which must be effectful)
 #[inline]
 pub fn lazy<T, F>(v: F) -> impl Effectful<Output = T, Effect = !>
 where

@@ -17,18 +17,22 @@ thread_local! {
     static TLS_CX: Cell<Option<&'static Context>> = Cell::new(None);
 }
 
-/// The untyped context of an effectful computation
+/// The untyped context of the task
+///
+/// `Context` coordinates how the task gets notified of the next poll
 #[derive(Clone)]
 pub struct Context {
     notify: Arc<dyn Notify>,
 }
 
 impl Context {
+    /// Construct a context out of [Notify](trait.Notify.html)
     pub fn from_notify(notify: Arc<dyn Notify>) -> Self {
         Context { notify }
     }
 }
 
+/// A thread-safe storage
 #[derive(Debug)]
 pub struct Storage<T> {
     value: Arc<Mutex<Option<T>>>,
@@ -49,16 +53,20 @@ impl<T> Storage<T> {
         }
     }
 
+    /// Takes the value of the storage, leaving a `None`
     pub fn try_take(&self) -> Option<T> {
         self.value.try_lock().ok()?.take()
     }
 
+    /// Set the value of the storage
     pub fn set(&self, v: T) {
         *self.value.lock().unwrap() = Some(v);
     }
 }
 
+/// A notification object
 pub trait Notify: Send + Sync {
+    /// Notify the runtime of the wakeup of the task
     fn wake(&self);
 }
 
@@ -94,7 +102,7 @@ impl<E: Effect> Waker<E> {
         Self { storage, notify }
     }
 
-    /// Wake up the task associated with this context
+    /// Wake up the task
     pub fn wake(&self, v: E::Output) {
         // set handler result
         self.storage.set(v);
@@ -104,27 +112,14 @@ impl<E: Effect> Waker<E> {
     }
 }
 
-// raw pointer is just an untyped box, so we can implement Send and Sync (really?)
-unsafe impl<E> Send for Waker<E>
-where
-    E: Effect,
-    E::Output: Send,
-{
-}
-unsafe impl<E> Sync for Waker<E>
-where
-    E: Effect,
-    E::Output: Sync,
-{
-}
-
+/// Create a channel for communicating the result of an effect under the context
 pub fn channel<E: Effect>(cx: &Context) -> (TypedContext<E>, Storage<E::Output>) {
     let storage = Storage::new();
     let waker = Waker::new(storage.clone(), Arc::clone(&cx.notify));
     (TypedContext(waker), storage)
 }
 
-/// The typed context of an computation
+/// The typed context of the task
 pub struct TypedContext<E: Effect>(Waker<E>);
 
 impl<E: Effect> fmt::Debug for TypedContext<E>
@@ -137,16 +132,17 @@ where
 }
 
 impl<E: Effect> TypedContext<E> {
+    /// Retrieve a waker of the task
     pub fn waker(&self) -> Waker<E> {
         self.0.clone()
     }
 
-    /// Create a `Continue` effect for the completion of the source computation
+    /// Create a [Continue](../struct.Continue.html) effect for the completion of the source computation
     pub fn continuation<R>(self) -> Continue<R> {
         Continue::new()
     }
 
-    /// Wake up the task and create a `Continue` effect
+    /// Wake up the task and create a [Continue](../struct.Continue.html) effect
     ///
     /// This method can be used to immediately resume the source computation
     pub fn resume<R>(self, v: E::Output) -> Continue<R> {

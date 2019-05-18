@@ -86,6 +86,7 @@ macro_rules! perform_from {
     }};
 }
 
+/// Poll the pinned computation until it produces the result or an effect
 #[macro_export]
 macro_rules! await_poll {
     ($pinned_comp:expr) => {{
@@ -141,7 +142,7 @@ macro_rules! handler {
 
 /// An effectful computation block
 ///
-/// The block must contain `perform!` or `perform_from!`
+/// The block must contain `perform!`, `perform_from!`, or `await_poll!`
 #[macro_export]
 macro_rules! effectful {
     ($($tts:tt)*) => {{
@@ -181,9 +182,12 @@ pub enum Poll<T, Effect> {
     Pending,
 }
 
+/// The result of `await_poll!`
 #[derive(Debug)]
 pub enum AwaitedPoll<T, Effect> {
+    /// The computaion is done
     Done(T),
+    /// An effect has been performed
     Effect(Effect),
 }
 

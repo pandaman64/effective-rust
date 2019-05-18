@@ -111,7 +111,6 @@ where
                             Done(v) => {
                                 this.source = None;
                                 this.state = ActiveComputation::Handler;
-
                                 // TODO: what if this.handler panics?
                                 let comp = (this.handler)(AwaitedPoll::Done(v));
                                 this.handler_stack.push(Handler::new(comp));
