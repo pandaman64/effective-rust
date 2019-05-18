@@ -1,4 +1,4 @@
-#![feature(generators, never_type, impl_trait_in_bindings)]
+#![feature(generators, never_type)]
 
 use eff::{eff, handler, perform, Effect, Effectful};
 

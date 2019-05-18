@@ -1,6 +1,6 @@
 //! 1.1. Recovering from errors
 
-#![feature(generators, generator_trait, never_type)]
+#![feature(generators, never_type)]
 
 use eff::*;
 

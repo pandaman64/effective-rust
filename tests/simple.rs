@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait, never_type)]
+#![feature(generators, never_type)]
 
 use eff::*;
 
