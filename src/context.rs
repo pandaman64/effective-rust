@@ -59,7 +59,7 @@ impl<T> Storage<T> {
 }
 
 pub trait Notify: Send + Sync {
-    fn wake(self: Arc<Self>);
+    fn wake(&self);
 }
 
 /// The waker of the task

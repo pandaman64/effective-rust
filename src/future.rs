@@ -35,7 +35,7 @@ struct FutureNotify {
 }
 
 impl Notify for FutureNotify {
-    fn wake(self: Arc<Self>) {
+    fn wake(&self) {
         self.waker.wake_by_ref();
     }
 }

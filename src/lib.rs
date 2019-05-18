@@ -294,7 +294,7 @@ pub trait Effectful {
         }
 
         impl Notify for CurrentThreadNotify {
-            fn wake(self: Arc<Self>) {
+            fn wake(&self) {
                 self.thread.unpark();
             }
         }

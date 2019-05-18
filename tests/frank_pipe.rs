@@ -75,7 +75,7 @@ fn test_pipe() {
     struct DoNothingNotify;
 
     impl Notify for DoNothingNotify {
-        fn wake(self: Arc<Self>) {}
+        fn wake(&self) {}
     }
 
     let context = Context::from_notify(Arc::new(DoNothingNotify));
