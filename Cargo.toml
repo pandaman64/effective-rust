@@ -17,6 +17,7 @@ pin-utils = "0.1.0-alpha.4"
 [dev-dependencies]
 clap = "2.33"
 futures-preview = "0.3.0-alpha.16"
+runtime = "0.3.0-alpha.4"
 
 [workspace]
 members = [
