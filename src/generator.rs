@@ -27,13 +27,10 @@ where
         use GeneratorState::*;
         use Poll::*;
 
-        unsafe {
-            let this = &mut self.get_unchecked_mut().0;
-            set_task_context(cx, || match Pin::new_unchecked(this).resume() {
-                Complete(v) => Done(v),
-                Yielded(Suspension::Effect(e)) => Effect(e),
-                Yielded(Suspension::Pending) => Pending,
-            })
-        }
+        set_task_context(cx, || match unsafe { self.map_unchecked_mut(|this| &mut this.0) }.resume() {
+            Complete(v) => Done(v),
+            Yielded(Suspension::Effect(e)) => Effect(e),
+            Yielded(Suspension::Pending) => Pending,
+        })
     }
 }
