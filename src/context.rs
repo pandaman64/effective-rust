@@ -4,14 +4,14 @@
 //! via `.waker()` and perform a special effect called [Continue](../struct.Continue.html).
 //! `Continue` effect makes the handler wait for the source computation to complete.
 
-use super::{Continue, Effect};
+use super::{Continue, Effect, Effectful, Poll};
 
 use std::cell::Cell;
 use std::fmt;
-use std::sync::{Arc, Mutex};
-
-use crate::{Effectful, Poll};
 use std::pin::Pin;
+use std::sync::Arc;
+
+use crossbeam_channel::{bounded, Receiver, Sender};
 
 thread_local! {
     static TLS_CX: Cell<Option<&'static Context>> = Cell::new(None);
@@ -32,38 +32,6 @@ impl Context {
     }
 }
 
-/// A thread-safe storage
-#[derive(Debug)]
-pub struct Storage<T> {
-    value: Arc<Mutex<Option<T>>>,
-}
-
-impl<T> Clone for Storage<T> {
-    fn clone(&self) -> Self {
-        Self {
-            value: Arc::clone(&self.value),
-        }
-    }
-}
-
-impl<T> Storage<T> {
-    fn new() -> Self {
-        Storage {
-            value: Default::default(),
-        }
-    }
-
-    /// Takes the value of the storage, leaving a `None`
-    pub fn try_take(&self) -> Option<T> {
-        self.value.try_lock().ok()?.take()
-    }
-
-    /// Set the value of the storage
-    pub fn set(&self, v: T) {
-        *self.value.lock().unwrap() = Some(v);
-    }
-}
-
 /// A notification object
 pub trait Notify: Send + Sync {
     /// Notify the runtime of the wakeup of the task
@@ -72,7 +40,7 @@ pub trait Notify: Send + Sync {
 
 /// The waker of the task
 pub struct Waker<E: Effect> {
-    storage: Storage<E::Output>,
+    sender: Sender<E::Output>,
     notify: Arc<dyn Notify>,
 }
 
@@ -82,7 +50,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Waker")
-            .field("storage", &self.storage)
+            .field("sender", &self.sender)
             .field("notify", &"<...>")
             .finish()
     }
@@ -91,32 +59,50 @@ where
 impl<E: Effect> Clone for Waker<E> {
     fn clone(&self) -> Self {
         Self {
-            storage: self.storage.clone(),
+            sender: self.sender.clone(),
             notify: Arc::clone(&self.notify),
         }
     }
 }
 
 impl<E: Effect> Waker<E> {
-    fn new(storage: Storage<E::Output>, notify: Arc<dyn Notify>) -> Self {
-        Self { storage, notify }
+    fn new(sender: Sender<E::Output>, notify: Arc<dyn Notify>) -> Self {
+        Self { sender, notify }
     }
 
     /// Wake up the task
     pub fn wake(&self, v: E::Output) {
-        // set handler result
-        self.storage.set(v);
+        // set handler result.
+        // do not notify the task if send fails because the result will not be used.
+        if let Ok(()) = self.sender.send(v) {
+            // wake up the task
+            self.notify.wake();
+        }
+    }
 
-        // wake up the task
-        Arc::clone(&self.notify).wake();
+    /// Wake up the task if no other wakers have already woken it up
+    ///
+    /// # Errors
+    /// Returns an error if another waker has already woken up the task
+    pub fn try_wake(&self, v: E::Output) -> Result<(), E::Output> {
+        // set handler result.
+        // do not notify the task if send fails because the result will not be used.
+        match self.sender.try_send(v) {
+            Ok(()) => {
+                // wake up the task
+                self.notify.wake();
+                Ok(())
+            }
+            Err(e) => Err(e.into_inner()),
+        }
     }
 }
 
 /// Create a channel for communicating the result of an effect under the context
-pub fn channel<E: Effect>(cx: &Context) -> (TypedContext<E>, Storage<E::Output>) {
-    let storage = Storage::new();
-    let waker = Waker::new(storage.clone(), Arc::clone(&cx.notify));
-    (TypedContext(waker), storage)
+pub fn channel<E: Effect>(cx: &Context) -> (TypedContext<E>, Receiver<E::Output>) {
+    let (sender, receiver) = bounded(1);
+    let waker = Waker::new(sender, Arc::clone(&cx.notify));
+    (TypedContext(waker), receiver)
 }
 
 /// The typed context of the task

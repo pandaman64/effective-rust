@@ -49,7 +49,7 @@ macro_rules! perform {
                 let (waker, receiver) = $crate::context::channel(cx);
                 yield $crate::Suspension::Effect($crate::coproduct::Inject::inject(eff, waker));
                 loop {
-                    if let Some(v) = receiver.try_take() {
+                    if let Ok(v) = receiver.try_recv() {
                         break v;
                     } else {
                         yield $crate::Suspension::Pending;
