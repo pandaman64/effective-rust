@@ -11,6 +11,9 @@ use std::pin::Pin;
 /// A lazy computation with no effects
 pub struct Lazy<F>(Option<F>);
 
+// Safe because we will not create Pin<&mut F>
+impl<F> Unpin for Lazy<F> {}
+
 impl<T, F> Effectful for Lazy<F>
 where
     F: FnOnce() -> T,
@@ -23,11 +26,8 @@ where
     /// # Panics
     /// Panics if the task is polled again after completion
     #[inline]
-    fn poll(self: Pin<&mut Self>, _cx: &Context) -> Poll<Self::Output, Self::Effect> {
-        unsafe {
-            let f = &mut self.get_unchecked_mut().0;
-            Poll::Done(f.take().expect("poll after completion")())
-        }
+    fn poll(mut self: Pin<&mut Self>, _cx: &Context) -> Poll<Self::Output, Self::Effect> {
+        Poll::Done(self.0.take().expect("poll after completion")())
     }
 }
 
