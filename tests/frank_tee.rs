@@ -28,24 +28,31 @@ impl Effect for Abort {
 }
 
 #[eff(Abort)]
-fn pipe<T, U>(
+fn tee<T: Clone, U>(
     tx: impl Effectful<Effect = Coproduct![Send<T>], Output = ()>,
-    rx: impl Effectful<Effect = Coproduct![Receive<T>], Output = U>,
+    rx1: impl Effectful<Effect = Coproduct![Receive<T>], Output = U>,
+    rx2: impl Effectful<Effect = Coproduct![Receive<T>], Output = U>,
 ) -> U {
     use AwaitedPoll::*;
 
     pin_mut!(tx);
-    pin_mut!(rx);
+    pin_mut!(rx1);
+    pin_mut!(rx2);
 
     loop {
-        match await_join!(tx.as_mut(), rx.as_mut()) {
-            (Effect(A(Send(msg), send)), Effect(A(Receive(_), recv))) => {
+        match await_join!(tx.as_mut(), rx1.as_mut(), rx2.as_mut()) {
+            (
+                Effect(A(Send(msg), send)),
+                Effect(A(Receive(_), recv1)),
+                Effect(A(Receive(_), recv2)),
+            ) => {
                 send.waker().wake(());
-                recv.waker().wake(msg);
+                recv1.waker().wake(msg.clone());
+                recv2.waker().wake(msg);
             }
-            (Effect(_), Effect(_)) => unreachable!(), // Rust can't prove this arm is unreachable
-            (_, Done(v)) => return v,
-            (Done(()), Effect(_)) => perform!(Abort),
+            (Effect(_), Effect(_), Effect(_)) => unreachable!(), // Rust can't prove this arm is unreachable
+            (_, Done(v), _) | (_, _, Done(v)) => return v,
+            (Done(()), Effect(_), Effect(_)) => perform!(Abort),
         }
     }
 }
@@ -53,21 +60,29 @@ fn pipe<T, U>(
 #[test]
 fn test_pipe() {
     let tx = effectful! {
-        for i in 0..10 {
+        for i in 1..10 {
             perform!(Send(i));
         }
     };
 
-    let rx = effectful! {
+    let rx1 = effectful! {
         let mut sum = 0;
-        for _ in 0..5 {
+        for _ in 1..5 {
             sum += perform!(Receive(PhantomData));
         }
         sum
     };
 
-    let pipe = pipe(tx, rx);
-    pin_mut!(pipe);
+    let rx2 = effectful! {
+        let mut prod = 1;
+        for _ in 1..4 {
+            prod *= perform!(Receive(PhantomData));
+        }
+        prod
+    };
+
+    let tee = tee(tx, rx1, rx2);
+    pin_mut!(tee);
 
     struct DoNothingNotify;
 
@@ -77,8 +92,8 @@ fn test_pipe() {
 
     let context = Context::from_notify(Arc::new(DoNothingNotify));
 
-    match pipe.poll(&context) {
-        Poll::Done(10) => {}
+    match tee.poll(&context) {
+        Poll::Done(6) => {}
         x => panic!("invalid output: {:?}", x),
     }
 }

@@ -100,6 +100,15 @@ macro_rules! await_poll {
     }};
 }
 
+#[macro_export]
+macro_rules! await_join {
+    ($($comps:expr),* $(,)?) => {{
+        ($(
+            $crate::await_poll!($comps)
+        ),*)
+    }}
+}
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! handler_impl {
