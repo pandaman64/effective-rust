@@ -19,6 +19,7 @@ pub mod future;
 pub mod generator;
 pub mod handled;
 pub mod lazy;
+pub mod poll_fn;
 
 pub use context::{Context, Notify, TypedContext, Waker};
 pub use generator::from_generator;
