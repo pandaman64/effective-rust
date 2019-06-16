@@ -75,6 +75,8 @@ macro_rules! perform_from {
                     match $crate::context::poll_with_task_context(eff) {
                         $crate::Poll::Done(x) => break x,
                         $crate::Poll::Effect(e) => {
+                            // if the computation has no effects, this arm is unreachable
+                            #[allow(unreachable_code)]
                             yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
                         }
                         $crate::Poll::Pending => {

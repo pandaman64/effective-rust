@@ -1,5 +1,7 @@
 //! Convert a computation with no effects into a future
 
+use futures::task::ArcWake;
+
 use std::future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -41,4 +43,36 @@ impl Notify for FutureNotify {
     fn wake(&self) {
         self.waker.wake_by_ref();
     }
+}
+
+impl ArcWake for super::Context {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        arc_self.notify().wake();
+    }
+}
+
+#[derive(Debug)]
+pub struct FromFuture<F>(pub(crate) F);
+
+impl<F> Effectful for FromFuture<F>
+where
+    F: future::Future,
+{
+    type Output = F::Output;
+    type Effect = !;
+
+    #[inline]
+    fn poll(self: Pin<&mut Self>, cx: &super::Context) -> super::Poll<Self::Output, Self::Effect> {
+        let waker = Arc::new(cx.clone()).into_waker();
+        let mut cx = task::Context::from_waker(&waker);
+        let fut = unsafe { self.map_unchecked_mut(|this| &mut this.0) };
+        match fut.poll(&mut cx) {
+            task::Poll::Ready(v) => super::Poll::Done(v),
+            task::Poll::Pending => super::Poll::Pending,
+        }
+    }
+}
+
+pub fn from_future<F>(fut: F) -> FromFuture<F> {
+    FromFuture(fut)
 }

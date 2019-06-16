@@ -30,6 +30,10 @@ impl Context {
     pub fn from_notify(notify: Arc<dyn Notify>) -> Self {
         Context { notify }
     }
+
+    pub fn notify(&self) -> &Arc<dyn Notify> {
+        &self.notify
+    }
 }
 
 /// A notification object
