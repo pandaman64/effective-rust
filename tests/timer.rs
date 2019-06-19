@@ -83,7 +83,7 @@ fn test_timer_effect() {
                     AwaitedPoll::Effect(A(Delay(instant), k)) => {
                         // assume timer is already initialized
                         let delay = handle.lock().unwrap().as_ref().unwrap().delay(instant);
-                        perform_from!(future::from_future(delay.compat())).unwrap();
+                        perform_from!(future::future::from_future(delay.compat())).unwrap();
                         k.waker().wake(());
                     },
                     AwaitedPoll::Effect(B(_)) => unreachable!(),

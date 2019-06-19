@@ -286,11 +286,11 @@ pub trait Effectful {
     }
 
     #[inline]
-    fn into_future(self) -> future::IntoFuture<Self>
+    fn into_future(self) -> future::future::IntoFuture<Self>
     where
         Self: Effectful<Effect = !> + Sized,
     {
-        future::IntoFuture(self)
+        future::future::IntoFuture(self)
     }
 
     /// Run the computation to completion on the current thread
