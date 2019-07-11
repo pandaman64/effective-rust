@@ -1,11 +1,5 @@
 extern crate proc_macro;
 
-#[macro_use]
-extern crate syn;
-
-#[macro_use]
-extern crate quote;
-
 use proc_macro::TokenStream;
 
 type TokenStream2 = proc_macro2::TokenStream;
@@ -15,10 +9,11 @@ type TokenStream2 = proc_macro2::TokenStream;
 /// This macro transforms the function like what `async fn` does
 #[proc_macro_attribute]
 pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
+    use quote::quote;
     use syn::parse::Parser;
     use syn::punctuated::Punctuated;
 
-    let effects_parser = Punctuated::<syn::Type, Token![,]>::parse_terminated;
+    let effects_parser = Punctuated::<syn::Type, syn::token::Comma>::parse_terminated;
     let types = effects_parser
         .parse(attr)
         .expect("failed to parse attribute");
