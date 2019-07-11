@@ -1,7 +1,6 @@
 #![feature(async_await, generators, never_type)]
 
 use eff::*;
-use futures::compat::Future01CompatExt;
 use futures::executor::ThreadPool;
 use pin_utils::pin_mut;
 use tokio_timer::{sleep, timer::Timer};
@@ -15,10 +14,7 @@ fn test_fail_timer_future() {
     let handle = thread::spawn(|| {
         let fut = Box::pin(async {
             eprintln!("foo");
-            sleep(Duration::from_millis(100))
-                .compat()
-                .await
-                .expect("timer runtime is not correctly set up"); // panic here
+            sleep(Duration::from_millis(100)).await;
             eprintln!("bar");
         });
 
@@ -26,9 +22,7 @@ fn test_fail_timer_future() {
         pool.run(fut);
     });
 
-    let err = handle.join().unwrap_err();
-    let msg: &String = err.downcast_ref().unwrap();
-    assert!(msg.starts_with("timer runtime is not correctly set up"));
+    assert!(handle.join().is_err());
 }
 
 #[test]
@@ -73,6 +67,7 @@ fn test_timer_effect() {
 
         // wait for the timer thread to set up
         thread::park();
+        let handle = handle.lock().unwrap().clone().unwrap();
 
         effectful! {
             pin_mut!(comp);
@@ -81,9 +76,8 @@ fn test_timer_effect() {
                 match await_poll!(comp.as_mut()) {
                     AwaitedPoll::Done(v) => return v,
                     AwaitedPoll::Effect(A(Delay(instant), k)) => {
-                        // assume timer is already initialized
-                        let delay = handle.lock().unwrap().as_ref().unwrap().delay(instant);
-                        perform_from!(future::future::from_future(delay.compat())).unwrap();
+                        let delay = handle.delay(instant);
+                        perform_from!(future::future::from_future(delay));
                         k.waker().wake(());
                     },
                     AwaitedPoll::Effect(B(_)) => unreachable!(),

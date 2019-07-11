@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-eff-attr = "0.0.6"
+eff-attr = "0.0.8"
 proc-macro-hack = "0.5.4"
 pin-utils = "0.1.0-alpha.4"
 crossbeam-channel = "0.3.8"
@@ -19,8 +19,8 @@ futures-preview = "0.3.0-alpha.16"
 [dev-dependencies]
 clap = "2.33"
 runtime = "0.3.0-alpha.4"
-tokio-timer = "0.2.11"
-tokio = "0.1.21"
+tokio = { git = "https://github.com/tokio-rs/tokio.git" }
+tokio-timer = { git = "https://github.com/tokio-rs/tokio.git" }
 
 [workspace]
 members = [
