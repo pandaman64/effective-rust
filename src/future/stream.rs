@@ -1,5 +1,5 @@
 use futures::stream::Stream;
-use futures::task::ArcWake;
+use futures::task::waker;
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -58,7 +58,7 @@ where
     type Effect = Item<S::Item>;
 
     fn poll(self: Pin<&mut Self>, cx: &crate::Context) -> crate::Poll<Self::Output, Self::Effect> {
-        let waker = Arc::new(cx.clone()).into_waker();
+        let waker = waker(Arc::new(cx.clone()));
         let mut cx = task::Context::from_waker(&waker);
         let stream = unsafe { self.map_unchecked_mut(|this| &mut this.0) };
         match stream.poll_next(&mut cx) {

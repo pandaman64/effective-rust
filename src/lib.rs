@@ -152,6 +152,38 @@ macro_rules! handler {
     }};
 }
 
+#[macro_export]
+macro_rules! handle_impl {
+    ($e:expr , ) => {{
+        yield $crate::Suspension::Effect($e);
+    }};
+    ($e:expr , $effect:pat, $k:pat => $handler:expr; $($effects:pat, $ks:pat => $handlers:expr;)*) => {{
+        match $e {
+            $crate::coproduct::Either::A($effect, $k) => $handler,
+            $crate::coproduct::Either::B(effect) => $crate::handle_impl!(effect , $($effects, $ks => $handlers;)*),
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! handle {
+    ($expr:expr ; $value:pat => $value_handler:expr $(, $effect:pat, $k:pat => $handler:expr)* $(,)?) => {{
+        loop {
+            match $expr {
+                $crate::Poll::Done($value) => {
+                    $value_handler;
+                    break;
+                },
+                $crate::Poll::Effect(e) => {
+                    $crate::handle_impl!(e, $($effect, $k => $handler;)*);
+                    break;
+                },
+                $crate::Poll::Pending => {},
+            }
+        }
+    }};
+}
+
 /// An effectful computation block
 ///
 /// The block must contain `perform!`, `perform_from!`, or `await_poll!`

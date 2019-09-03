@@ -1,4 +1,4 @@
-#![feature(generators, never_type, async_await)]
+#![feature(generators, never_type)]
 
 use eff::*;
 use futures::executor::block_on;
