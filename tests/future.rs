@@ -1,3 +1,4 @@
+#![cfg(feature = "futures")]
 #![feature(generators, never_type)]
 
 use eff::*;

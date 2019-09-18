@@ -15,6 +15,7 @@ pub mod context;
 pub mod coproduct;
 pub mod either;
 pub mod embed;
+#[cfg(feature = "futures")]
 pub mod future;
 pub mod generator;
 pub mod handled;
@@ -44,18 +45,15 @@ macro_rules! Coproduct {
 #[macro_export]
 macro_rules! perform {
     ($eff:expr) => {{
-        match $eff {
-            eff => {
-                let cx = $crate::context::get_task_context();
-                let (waker, receiver) = $crate::context::channel(cx);
-                yield $crate::Suspension::Effect($crate::coproduct::Inject::inject(eff, waker));
-                loop {
-                    if let Ok(v) = receiver.try_recv() {
-                        break v;
-                    } else {
-                        yield $crate::Suspension::Pending;
-                    }
-                }
+        let eff = $eff;
+        let cx = $crate::context::get_task_context();
+        let (waker, receiver) = $crate::context::channel(cx);
+        yield $crate::Suspension::Effect($crate::coproduct::Inject::inject(eff, waker));
+        loop {
+            if let Ok(v) = receiver.try_recv() {
+                break v;
+            } else {
+                yield $crate::Suspension::Pending;
             }
         }
     }};
@@ -67,22 +65,19 @@ macro_rules! perform {
 #[macro_export]
 macro_rules! perform_from {
     ($eff:expr) => {{
-        match $eff {
-            eff => {
-                $crate::pin_mut!(eff);
-                loop {
-                    let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
-                    match $crate::context::poll_with_task_context(eff) {
-                        $crate::Poll::Done(x) => break x,
-                        $crate::Poll::Effect(e) => {
-                            // if the computation has no effects, this arm is unreachable
-                            #[allow(unreachable_code)]
-                            yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
-                        }
-                        $crate::Poll::Pending => {
-                            yield $crate::Suspension::Pending;
-                        }
-                    }
+        let eff = $eff;
+        $crate::pin_mut!(eff);
+        loop {
+            let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
+            match $crate::context::poll_with_task_context(eff) {
+                $crate::Poll::Done(x) => break x,
+                $crate::Poll::Effect(e) => {
+                    // if the computation has no effects, this arm is unreachable
+                    #[allow(unreachable_code)]
+                    yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
+                }
+                $crate::Poll::Pending => {
+                    yield $crate::Suspension::Pending;
                 }
             }
         }
@@ -317,6 +312,7 @@ pub trait Effectful {
         self
     }
 
+    #[cfg(feature = "futures")]
     #[inline]
     fn into_future(self) -> future::future::IntoFuture<Self>
     where

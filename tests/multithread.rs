@@ -1,3 +1,5 @@
+// abusing feature for disabling multithreading in miri
+#![cfg(feature = "futures")]
 #![feature(generators, never_type)]
 
 use std::thread;
