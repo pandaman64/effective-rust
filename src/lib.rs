@@ -1,4 +1,4 @@
-#![feature(generator_trait, never_type)]
+#![feature(generator_trait, never_type, stmt_expr_attributes, proc_macro_hygiene)]
 
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -432,6 +432,7 @@ where
 {
     type Output = C::Output;
     type Effect = C::Effect;
+
     #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         C::poll((*self).as_mut(), cx)

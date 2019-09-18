@@ -5,7 +5,10 @@ use super::{context::set_task_context, Context, Effectful, Poll, Suspension};
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 
-struct GenEffectful<G>(G);
+use pin_project::pin_project;
+
+#[pin_project]
+struct GenEffectful<G>(#[pin] G);
 
 /// Create an effectful computation which wraps a generator
 pub fn from_generator<G, Output, Effect>(x: G) -> impl Effectful<Output = Output, Effect = Effect>
@@ -28,7 +31,7 @@ where
         use Poll::*;
 
         set_task_context(cx, || {
-            match unsafe { self.map_unchecked_mut(|this| &mut this.0) }.resume() {
+            match self.project_into().0.resume() {
                 Complete(v) => Done(v),
                 Yielded(Suspension::Effect(e)) => Effect(e),
                 Yielded(Suspension::Pending) => Pending,
