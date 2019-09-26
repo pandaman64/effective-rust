@@ -31,7 +31,7 @@ where
         use Poll::*;
 
         set_task_context(cx, || {
-            match self.project_into().0.resume() {
+            match self.project().0.resume() {
                 Complete(v) => Done(v),
                 Yielded(Suspension::Effect(e)) => Effect(e),
                 Yielded(Suspension::Pending) => Pending,
