@@ -15,14 +15,14 @@ pub mod context;
 pub mod coproduct;
 pub mod either;
 pub mod embed;
-#[cfg(feature = "futures")]
-pub mod future;
+#[cfg(feature = "futures-compat")]
+pub mod futures_compat;
 pub mod generator;
 pub mod handled;
 pub mod lazy;
 pub mod poll_fn;
 
-pub use context::{Context, Notify, TypedContext, Waker};
+pub use context::{poll_with_task_context, Context, Notify, TypedContext, Waker};
 pub use generator::from_generator;
 pub use lazy::{lazy, pure};
 
@@ -36,8 +36,14 @@ macro_rules! Coproduct {
     () => {
         !
     };
+    (: $tail:ty) => {
+        $tail
+    };
     ($head:ty $(,$tail:ty)* $(,)?) => {
         $crate::coproduct::Either<$head, $crate::Coproduct![$($tail),*]>
+    };
+    ($head:ty $(,$middle:ty)* : $tail:ty) => {
+        $crate::coproduct::Either<$head, $crate::Coproduct![$($middle),* : $tail]>
     };
 }
 
@@ -56,6 +62,13 @@ macro_rules! perform {
                 yield $crate::Suspension::Pending;
             }
         }
+    }};
+}
+
+#[macro_export]
+macro_rules! reperform_rest {
+    ($eff:expr) => {{
+        yield $crate::Suspension::Effect($crate::coproduct::EmbedRest::embed_rest($eff));
     }};
 }
 
@@ -82,29 +95,6 @@ macro_rules! perform_from {
             }
         }
     }};
-}
-
-/// Poll the pinned computation until it produces the result or an effect
-#[macro_export]
-macro_rules! await_poll {
-    ($pinned_comp:expr) => {{
-        loop {
-            match $crate::context::poll_with_task_context($pinned_comp) {
-                $crate::Poll::Done(x) => break $crate::AwaitedPoll::Done(x),
-                $crate::Poll::Effect(e) => break $crate::AwaitedPoll::Effect(e),
-                $crate::Poll::Pending => yield $crate::Suspension::Pending,
-            }
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! await_join {
-    ($($comps:expr),* $(,)?) => {{
-        ($(
-            $crate::await_poll!($comps)
-        ),*)
-    }}
 }
 
 #[doc(hidden)]
@@ -138,50 +128,18 @@ macro_rules! handler {
                 yield unreachable!();
             }
             match arg {
-                $crate::AwaitedPoll::Done(x) => match x {
+                $crate::Event::Done(x) => match x {
                     $value => $value_handler,
                 },
-                $crate::AwaitedPoll::Effect(e) => $crate::handler_impl!(e , $($effect, $k => $handler;)*),
+                $crate::Event::Effect(e) => $crate::handler_impl!(e , $($effect, $k => $handler;)*),
             }
         })
     }};
 }
 
-#[macro_export]
-macro_rules! handle_impl {
-    ($e:expr , ) => {{
-        yield $crate::Suspension::Effect($e);
-    }};
-    ($e:expr , $effect:pat, $k:pat => $handler:expr; $($effects:pat, $ks:pat => $handlers:expr;)*) => {{
-        match $e {
-            $crate::coproduct::Either::A($effect, $k) => $handler,
-            $crate::coproduct::Either::B(effect) => $crate::handle_impl!(effect , $($effects, $ks => $handlers;)*),
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! handle {
-    ($expr:expr ; $value:pat => $value_handler:expr $(, $effect:pat, $k:pat => $handler:expr)* $(,)?) => {{
-        loop {
-            match $expr {
-                $crate::Poll::Done($value) => {
-                    $value_handler;
-                    break;
-                },
-                $crate::Poll::Effect(e) => {
-                    $crate::handle_impl!(e, $($effect, $k => $handler;)*);
-                    break;
-                },
-                $crate::Poll::Pending => {},
-            }
-        }
-    }};
-}
-
 /// An effectful computation block
 ///
-/// The block must contain `perform!`, `perform_from!`, or `await_poll!`
+/// The block must contain `perform!` or `perform_from!`
 #[macro_export]
 macro_rules! effectful {
     ($($tts:tt)*) => {{
@@ -221,9 +179,9 @@ pub enum Poll<T, Effect> {
     Pending,
 }
 
-/// The result of `await_poll!`
+/// An observable event of an effectful computation
 #[derive(Debug)]
-pub enum AwaitedPoll<T, Effect> {
+pub enum Event<T, Effect> {
     /// The computaion is done
     Done(T),
     /// An effect has been performed
@@ -252,7 +210,7 @@ pub trait Effectful {
     where
         Self: Sized,
         HC: Effectful,
-        H: FnMut(AwaitedPoll<Self::Output, Effect>) -> HC,
+        H: FnMut(Event<Self::Output, Effect>) -> HC,
         Self::Effect: coproduct::Subset<Effect, I>,
     {
         Handled::new(self, handler)
@@ -312,13 +270,13 @@ pub trait Effectful {
         self
     }
 
-    #[cfg(feature = "futures")]
+    #[cfg(feature = "futures-compat")]
     #[inline]
-    fn into_future(self) -> future::future::IntoFuture<Self>
+    fn into_future(self) -> futures_compat::future::IntoFuture<Self>
     where
         Self: Effectful<Effect = !> + Sized,
     {
-        future::future::IntoFuture(self)
+        futures_compat::future::IntoFuture(self)
     }
 
     /// Run the computation to completion on the current thread

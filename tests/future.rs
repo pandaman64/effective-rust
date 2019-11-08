@@ -10,7 +10,7 @@ fn test_future() {
     block_on(e.into_future());
 }
 
-#[runtime::test]
+#[tokio::test]
 async fn test_runtime() {
     struct Choose;
 

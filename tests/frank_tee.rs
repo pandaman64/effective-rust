@@ -1,6 +1,5 @@
-#![feature(generators, never_type)]
+#![feature(generators, never_type, stmt_expr_attributes, proc_macro_hygiene)]
 
-use eff::coproduct::Either::A;
 use eff::*;
 use pin_utils::pin_mut;
 use std::marker::PhantomData;
@@ -33,27 +32,49 @@ fn tee<T: Clone, U>(
     rx1: impl Effectful<Effect = Coproduct![Receive<T>], Output = U>,
     rx2: impl Effectful<Effect = Coproduct![Receive<T>], Output = U>,
 ) -> U {
-    use AwaitedPoll::*;
-
     pin_mut!(tx);
     pin_mut!(rx1);
     pin_mut!(rx2);
 
     loop {
-        match await_join!(tx.as_mut(), rx1.as_mut(), rx2.as_mut()) {
-            (
-                Effect(A(Send(msg), send)),
-                Effect(A(Receive(_), recv1)),
-                Effect(A(Receive(_), recv2)),
-            ) => {
-                send.waker().wake(());
-                recv1.waker().wake(msg.clone());
-                recv2.waker().wake(msg);
+        #[eff]
+        match poll_with_task_context(rx1.as_mut()) {
+            v => return v,
+            (Receive(_), recv1) =>
+            {
+                #[eff]
+                match poll_with_task_context(rx2.as_mut()) {
+                    v => return v,
+                    (Receive(_), recv2) =>
+                    {
+                        #[eff]
+                        match poll_with_task_context(tx.as_mut()) {
+                            () => perform!(Abort),
+                            (Send(msg), send) => {
+                                send.waker().wake(());
+                                recv1.waker().wake(msg.clone());
+                                recv2.waker().wake(msg);
+                            }
+                        }
+                    }
+                }
             }
-            (Effect(_), Effect(_), Effect(_)) => unreachable!(), // Rust can't prove this arm is unreachable
-            (_, Done(v), _) | (_, _, Done(v)) => return v,
-            (Done(()), Effect(_), Effect(_)) => perform!(Abort),
         }
+
+        // Ideally, we want concurrent polling like this:
+        // eff-match (tx.as_mut(), rx1.as_mut(), rx2.as_mut()) {
+        //     (
+        //         <Send(msg), send)>,
+        //         <Receive(_), recv1>,
+        //         <Receive(_), recv2>,
+        //     ) => {
+        //         send.waker().wake(());
+        //         recv1.waker().wake(msg.clone());
+        //         recv2.waker().wake(msg);
+        //     }
+        //     (_, v, _) | (_, _, v) => return v,
+        //     ((), <_>, <_>) => perform!(Abort),
+        // }
     }
 }
 

@@ -1,10 +1,10 @@
-#![cfg(feature = "futures")]
-#![feature(generators, never_type)]
+#![cfg(feature = "futures-compat")]
+#![feature(generators, never_type, stmt_expr_attributes, proc_macro_hygiene)]
 
 use eff::*;
-use futures::executor::ThreadPool;
+use futures::executor::LocalPool;
 use pin_utils::pin_mut;
-use tokio_timer::{sleep, timer::Timer};
+use tokio_timer::{delay_for, timer::Timer};
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -15,12 +15,12 @@ fn test_fail_timer_future() {
     let handle = thread::spawn(|| {
         let fut = Box::pin(async {
             eprintln!("foo");
-            sleep(Duration::from_millis(100)).await;
+            delay_for(Duration::from_millis(100)).await;
             eprintln!("bar");
         });
 
-        let mut pool = ThreadPool::new().expect("failed to create thread pool");
-        pool.run(fut);
+        let mut pool = LocalPool::new();
+        pool.run_until(fut);
     });
 
     assert!(handle.join().is_err());
@@ -36,15 +36,13 @@ fn test_timer_effect() {
     }
 
     #[eff(Delay)]
-    fn sleep(duration: Duration) {
+    fn delay_for(duration: Duration) {
         perform!(Delay(Instant::now() + duration))
     }
 
     fn run_tokio_timer<T>(
         comp: impl Effectful<Output = T, Effect = Coproduct![Delay]>,
     ) -> impl Effectful<Output = T, Effect = !> {
-        use coproduct::Either::*;
-
         let handle = Arc::new(Mutex::new(None));
         let current = thread::current();
 
@@ -74,14 +72,14 @@ fn test_timer_effect() {
             pin_mut!(comp);
 
             loop {
-                match await_poll!(comp.as_mut()) {
-                    AwaitedPoll::Done(v) => return v,
-                    AwaitedPoll::Effect(A(Delay(instant), k)) => {
+                #[eff]
+                match poll_with_task_context(comp.as_mut()) {
+                    v => return v,
+                    (Delay(instant), k) => {
                         let delay = handle.delay(instant);
-                        perform_from!(future::future::from_future(delay));
+                        perform_from!(futures_compat::future::from_future(delay));
                         k.waker().wake(());
                     },
-                    AwaitedPoll::Effect(B(_)) => unreachable!(),
                 }
             }
         }
@@ -89,7 +87,7 @@ fn test_timer_effect() {
 
     let comp = run_tokio_timer(effectful! {
         eprintln!("foo");
-        perform_from!(sleep(Duration::from_millis(100)));
+        perform_from!(delay_for(Duration::from_millis(100)));
         eprintln!("bar");
     });
 

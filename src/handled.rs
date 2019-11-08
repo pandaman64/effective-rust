@@ -1,6 +1,6 @@
 //! An effectful computation with some effects handled
 
-use super::{coproduct::Either, AwaitedPoll, Context, Continue, Effectful, Poll, Waker};
+use super::{coproduct::Either, Event, Context, Continue, Effectful, Poll, Waker};
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -84,7 +84,7 @@ impl<C, Output, Effect, H, HC, HandledEffect, NewOutput, NewEffect, I> Effectful
     for Handled<C, H, HC, HandledEffect, I>
 where
     C: Effectful<Output = Output, Effect = Effect>,
-    H: FnMut(AwaitedPoll<Output, HandledEffect>) -> HC,
+    H: FnMut(Event<Output, HandledEffect>) -> HC,
     HC: Effectful<Output = NewOutput, Effect = Either<Continue<NewOutput>, NewEffect>>,
     Effect: super::coproduct::Subset<HandledEffect, I, Remainder = NewEffect>,
 {
@@ -112,14 +112,14 @@ where
                                 this.source = None;
                                 this.state = ActiveComputation::Handler;
                                 // TODO: what if this.handler panics?
-                                let comp = (this.handler)(AwaitedPoll::Done(v));
+                                let comp = (this.handler)(Event::Done(v));
                                 this.handler_stack.push(Handler::new(comp));
                             }
                             Effect(e) => match e.subset() {
                                 Ok(e) => {
                                     this.state = ActiveComputation::Handler;
                                     // TODO: what if this.handler panics?
-                                    let comp = (this.handler)(AwaitedPoll::Effect(e));
+                                    let comp = (this.handler)(Event::Effect(e));
                                     this.handler_stack.push(Handler::new(comp));
                                 }
                                 Err(rem) => return Effect(rem),

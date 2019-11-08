@@ -195,6 +195,26 @@ where
     }
 }
 
+pub trait EmbedRest<Target, Index> {
+    fn embed_rest(self) -> Target;
+}
+
+impl<T> EmbedRest<T, Zero> for T {
+    fn embed_rest(self) -> T {
+        self
+    }
+}
+
+impl<Head, Tail, N, Rest> EmbedRest<Either<Head, Tail>, Succ<N>> for Rest
+where
+    Head: Effect,
+    Rest: EmbedRest<Tail, N>,
+{
+    fn embed_rest(self) -> Either<Head, Tail> {
+        Either::B(self.embed_rest())
+    }
+}
+
 impl<F, Rest> Either<F, Rest>
 where
     F: Effect,

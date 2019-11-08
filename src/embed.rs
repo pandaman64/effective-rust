@@ -31,7 +31,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         use Poll::*;
 
-        match self.project_into().0.poll(cx) {
+        match self.project().0.poll(cx) {
             Done(v) => Done(v),
             Effect(e) => Effect(e.embed()),
             Pending => Pending,

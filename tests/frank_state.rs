@@ -1,10 +1,6 @@
-#![feature(generators, never_type)]
+#![feature(generators, never_type, stmt_expr_attributes, proc_macro_hygiene)]
 
-use eff::{
-    context::poll_with_task_context,
-    coproduct::Either::{A, B},
-    *,
-};
+use eff::*;
 use pin_utils::pin_mut;
 use std::marker::PhantomData;
 
@@ -36,17 +32,14 @@ fn run_state<S: Clone, T>(
     pin_mut!(comp);
 
     loop {
+        #[eff]
         match poll_with_task_context(comp.as_mut()) {
-            Poll::Done(x) => return (init, x),
-            Poll::Effect(A(Get(_), cx)) => {
-                cx.waker().wake(init.clone());
-            }
-            Poll::Effect(B(A(Set(v), cx))) => {
+            x => return (init, x),
+            (Get(_), k) => k.waker().wake(init.clone()),
+            (Set(v), k) => {
                 init = v;
-                cx.waker().wake(());
+                k.waker().wake(());
             }
-            Poll::Effect(B(B(_))) => unreachable!(),
-            Poll::Pending => yield Suspension::Pending,
         }
     }
 }
@@ -76,7 +69,7 @@ fn do_something() -> String {
 }
 
 #[test]
-fn test_frunk_state() {
+fn test_frank_state() {
     assert_eq!(
         run_state(10, do_something()).block_on(),
         (23, "10\n11\n22".to_string())

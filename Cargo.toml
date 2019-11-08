@@ -10,22 +10,21 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 
 [features]
-default = ["futures"]
+default = ["futures-compat"]
 
-futures = ["futures-preview"]
+futures-compat = ["futures"]
 
 [dependencies]
-eff-attr = "0.0.8"
+eff-attr = { path = "./eff-attr" }
 pin-utils = "0.1.0-alpha.4"
-crossbeam-channel = "0.3.9"
-futures-preview = { version = "0.3.0-alpha.18", optional = true }
-pin-project = { version = "0.4.0-alpha.11", features = ["project_attr"] }
+crossbeam-channel = "0.4.0"
+pin-project = "0.4.5"
+futures = { version = "0.3.1", optional = true }
 
 [dev-dependencies]
 clap = "2.33.0"
-runtime = "0.3.0-alpha.7"
-tokio = "0.2.0-alpha.4"
-tokio-timer = "0.3.0-alpha.4"
+tokio = "0.2.0-alpha.6"
+tokio-timer = "0.3.0-alpha.6"
 
 [workspace]
 members = [

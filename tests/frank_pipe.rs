@@ -1,6 +1,5 @@
-#![feature(generators, never_type)]
+#![feature(generators, never_type, stmt_expr_attributes, proc_macro_hygiene)]
 
-use eff::coproduct::Either::A;
 use eff::*;
 use pin_utils::pin_mut;
 use std::marker::PhantomData;
@@ -32,21 +31,43 @@ fn pipe<T, U>(
     tx: impl Effectful<Effect = Coproduct![Send<T>], Output = ()>,
     rx: impl Effectful<Effect = Coproduct![Receive<T>], Output = U>,
 ) -> U {
-    use AwaitedPoll::*;
-
     pin_mut!(tx);
     pin_mut!(rx);
 
     loop {
-        match await_join!(tx.as_mut(), rx.as_mut()) {
-            (Effect(A(Send(msg), send)), Effect(A(Receive(_), recv))) => {
-                send.waker().wake(());
-                recv.waker().wake(msg);
+        // Not that good compared to Frank's simultaneous pattern-match
+        #[eff]
+        match poll_with_task_context(tx.as_mut()) {
+            () =>
+            {
+                #[eff]
+                match poll_with_task_context(rx.as_mut()) {
+                    v => return v,
+                    (_, _) => perform!(Abort),
+                }
             }
-            (Effect(_), Effect(_)) => unreachable!(), // Rust can't prove this arm is unreachable
-            (_, Done(v)) => return v,
-            (Done(()), Effect(_)) => perform!(Abort),
+            (Send(msg), send) =>
+            {
+                #[eff]
+                match poll_with_task_context(rx.as_mut()) {
+                    v => return v,
+                    (Receive(_), recv) => {
+                        send.waker().wake(());
+                        recv.waker().wake(msg);
+                    }
+                }
+            }
         }
+
+        // Ideally, this should be written like the following, where <...> matches against an effect:
+        // eff-match (tx.as_mut(), rx.as_mut()) {
+        //     (<Send(msg), send>, <Receive(_), recv>) => {
+        //         send.waker().wake(());
+        //         recv.waker().wake(msg);
+        //     }
+        //     (_, v) => return v,
+        //     ((), <_>) => perform!(Abort),
+        // }
     }
 }
 

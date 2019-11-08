@@ -24,7 +24,7 @@ where
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         #[project]
-        match self.project_into() {
+        match self.project() {
             Either::A(left) => left.poll(cx),
             Either::B(right) => right.poll(cx),
         }
