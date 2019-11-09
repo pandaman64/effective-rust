@@ -94,10 +94,10 @@ where
     // I'm not sure if this inline improves performance;
     // this method is much larger than I expected
     #[inline]
-    fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
+    fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
         // TODO: verify soundness
         unsafe {
-            let this = self.as_mut().get_unchecked_mut();
+            let this = self.get_unchecked_mut();
             loop {
                 match &mut this.state {
                     ActiveComputation::Source => {
