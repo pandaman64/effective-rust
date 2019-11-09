@@ -1,6 +1,6 @@
 [package]
 name = "eff"
-version = "0.0.8"
+version = "0.1.0"
 authors = ["pan"]
 edition = "2018"
 
@@ -15,7 +15,7 @@ default = ["futures-compat"]
 futures-compat = ["futures"]
 
 [dependencies]
-eff-attr = { path = "./eff-attr" }
+eff-attr = "0.1.0"
 pin-utils = "0.1.0-alpha.4"
 crossbeam-channel = "0.4.0"
 pin-project = "0.4.5"
