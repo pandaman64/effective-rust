@@ -1,6 +1,6 @@
 //! An effectful computation with some effects handled
 
-use super::{coproduct::Either, Event, Context, Continue, Effectful, Poll, Waker};
+use super::{coproduct::Either, Context, Continue, Effectful, Event, Poll, Waker};
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -95,8 +95,6 @@ where
     // this method is much larger than I expected
     #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
-        use Poll::*;
-
         // TODO: verify soundness
         unsafe {
             let this = self.as_mut().get_unchecked_mut();
@@ -108,34 +106,34 @@ where
                         )
                         .poll(cx)
                         {
-                            Done(v) => {
+                            Poll::Event(Event::Complete(v)) => {
                                 this.source = None;
                                 this.state = ActiveComputation::Handler;
                                 // TODO: what if this.handler panics?
-                                let comp = (this.handler)(Event::Done(v));
+                                let comp = (this.handler)(Event::Complete(v));
                                 this.handler_stack.push(Handler::new(comp));
                             }
-                            Effect(e) => match e.subset() {
+                            Poll::Event(Event::Effect(e)) => match e.subset() {
                                 Ok(e) => {
                                     this.state = ActiveComputation::Handler;
                                     // TODO: what if this.handler panics?
                                     let comp = (this.handler)(Event::Effect(e));
                                     this.handler_stack.push(Handler::new(comp));
                                 }
-                                Err(rem) => return Effect(rem),
+                                Err(rem) => return Poll::effect(rem),
                             },
-                            Pending => return Pending,
+                            Poll::Pending => return Poll::Pending,
                         }
                     }
                     ActiveComputation::Handler => {
                         let handler = &mut this.handler_stack.last_mut().unwrap().computation;
                         match handler.as_mut().poll(cx) {
-                            Done(v) => {
+                            Poll::Event(Event::Complete(v)) => {
                                 this.handler_stack.pop();
 
                                 // the last handler
                                 if this.handler_stack.is_empty() {
-                                    return Done(v);
+                                    return Poll::complete(v);
                                 } else {
                                     (this.handler_stack.last_mut().unwrap().waker)
                                         .take()
@@ -143,14 +141,14 @@ where
                                         .wake(v);
                                 }
                             }
-                            Effect(Either::A(_, cx)) => {
+                            Poll::Event(Event::Effect(Either::A(_, cx))) => {
                                 // continue the original computation
                                 this.state = ActiveComputation::Source;
 
                                 this.handler_stack.last_mut().unwrap().waker = Some(cx.waker());
                             }
-                            Effect(Either::B(e)) => return Effect(e),
-                            Pending => return Pending,
+                            Poll::Event(Event::Effect(Either::B(e))) => return Poll::effect(e),
+                            Poll::Pending => return Poll::Pending,
                         }
                     }
                 }

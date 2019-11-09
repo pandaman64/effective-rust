@@ -99,7 +99,7 @@ fn test_pipe() {
     let context = Context::from_notify(Arc::new(DoNothingNotify));
 
     match pipe.poll(&context) {
-        Poll::Done(10) => {}
+        Poll::Event(Event::Complete(10)) => {}
         x => panic!("invalid output: {:?}", x),
     }
 }

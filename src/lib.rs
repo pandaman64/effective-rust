@@ -54,12 +54,14 @@ macro_rules! perform {
         let eff = $eff;
         let cx = $crate::context::get_task_context();
         let (waker, receiver) = $crate::context::channel(cx);
-        yield $crate::Suspension::Effect($crate::coproduct::Inject::inject(eff, waker));
+        yield $crate::Poll::Event($crate::Event::Effect($crate::coproduct::Inject::inject(
+            eff, waker,
+        )));
         loop {
             if let Ok(v) = receiver.try_recv() {
                 break v;
             } else {
-                yield $crate::Suspension::Pending;
+                yield $crate::Poll::Pending;
             }
         }
     }};
@@ -68,7 +70,9 @@ macro_rules! perform {
 #[macro_export]
 macro_rules! reperform_rest {
     ($eff:expr) => {{
-        yield $crate::Suspension::Effect($crate::coproduct::EmbedRest::embed_rest($eff));
+        yield $crate::Poll::Event($crate::Event::Effect(
+            $crate::coproduct::EmbedRest::embed_rest($eff),
+        ));
     }};
 }
 
@@ -83,14 +87,16 @@ macro_rules! perform_from {
         loop {
             let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
             match $crate::context::poll_with_task_context(eff) {
-                $crate::Poll::Done(x) => break x,
-                $crate::Poll::Effect(e) => {
+                $crate::Poll::Event($crate::Event::Complete(x)) => break x,
+                $crate::Poll::Event($crate::Event::Effect(e)) => {
                     // if the computation has no effects, this arm is unreachable
                     #[allow(unreachable_code)]
-                    yield $crate::Suspension::Effect($crate::coproduct::Embed::embed(e));
+                    yield $crate::Poll::Event($crate::Event::Effect(
+                        $crate::coproduct::Embed::embed(e),
+                    ));
                 }
                 $crate::Poll::Pending => {
-                    yield $crate::Suspension::Pending;
+                    yield $crate::Poll::Pending;
                 }
             }
         }
@@ -128,7 +134,7 @@ macro_rules! handler {
                 yield unreachable!();
             }
             match arg {
-                $crate::Event::Done(x) => match x {
+                $crate::Event::Complete(x) => match x {
                     $value => $value_handler,
                 },
                 $crate::Event::Effect(e) => $crate::handler_impl!(e , $($effect, $k => $handler;)*),
@@ -168,31 +174,32 @@ impl<R> Continue<R> {
     }
 }
 
+/// An observable event of an effectful computation
+#[derive(Debug)]
+pub enum Event<T, Effect> {
+    /// The computaion is complete
+    Complete(T),
+    /// An effect has been performed
+    Effect(Effect),
+}
+
 /// The state of an effectful computation
 #[derive(Debug)]
 pub enum Poll<T, Effect> {
-    /// The computation is done
-    Done(T),
-    /// An effect has been performed
-    Effect(Effect),
+    /// An event occured
+    Event(Event<T, Effect>),
     /// The computation is not ready to continue
     Pending,
 }
 
-/// An observable event of an effectful computation
-#[derive(Debug)]
-pub enum Event<T, Effect> {
-    /// The computaion is done
-    Done(T),
-    /// An effect has been performed
-    Effect(Effect),
-}
+impl<T, Effect> Poll<T, Effect> {
+    pub fn complete(v: T) -> Poll<T, Effect> {
+        Poll::Event(Event::Complete(v))
+    }
 
-/// The cause for suspension of the computation
-#[derive(Debug)]
-pub enum Suspension<Effect> {
-    Effect(Effect),
-    Pending,
+    pub fn effect(e: Effect) -> Poll<T, Effect> {
+        Poll::Event(Event::Effect(e))
+    }
 }
 
 /// An effectful computation
@@ -289,8 +296,6 @@ pub trait Effectful {
     where
         Self: Sized + Effectful<Effect = !>,
     {
-        use Poll::*;
-
         struct CurrentThreadNotify {
             thread: thread::Thread,
         }
@@ -310,9 +315,9 @@ pub trait Effectful {
 
         loop {
             match this.as_mut().poll(&cx) {
-                Done(v) => return v,
-                Effect(e) => e,            // unreachable
-                Pending => thread::park(), // park until wake
+                Poll::Event(Event::Complete(v)) => return v,
+                Poll::Event(Event::Effect(e)) => e, // unreachable
+                Poll::Pending => thread::park(),    // park until wake
             }
         }
     }

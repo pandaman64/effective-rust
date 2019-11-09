@@ -41,7 +41,7 @@ fn func<R>(comp: impl Effectful<Output = (), Effect = Coproduct![In: R]>) {
 #[test]
 fn test_rest_parameter() {
     use coproduct::Either::*;
-    use Poll::*;
+    use Event::*;
     let incomp = effectful! {
         perform!(In);
     };
@@ -61,15 +61,15 @@ fn test_rest_parameter() {
 
     loop {
         match outcomp.as_mut().poll(&context) {
-            Done(()) => break,
-            Effect(A(Out, k)) => {
+            Poll::Event(Complete(())) => break,
+            Poll::Event(Effect(A(Out, k))) => {
                 count += 1;
                 k.waker().wake(());
             }
-            Effect(B(never)) => {
+            Poll::Event(Effect(B(never))) => {
                 let _: ! = never;
             }
-            Pending => unreachable!(),
+            Poll::Pending => unreachable!(),
         }
     }
 

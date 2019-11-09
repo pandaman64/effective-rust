@@ -27,7 +27,7 @@ where
     /// Panics if the task is polled again after completion
     #[inline]
     fn poll(mut self: Pin<&mut Self>, _cx: &Context) -> Poll<Self::Output, Self::Effect> {
-        Poll::Done(self.0.take().expect("poll after completion")())
+        Poll::complete(self.0.take().expect("poll after completion")())
     }
 }
 

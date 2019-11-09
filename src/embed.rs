@@ -2,7 +2,7 @@
 
 use pin_project::pin_project;
 
-use super::{coproduct::Embed, Context, Effectful, Poll};
+use super::{coproduct::Embed, Context, Effectful, Event, Poll};
 
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -29,12 +29,10 @@ where
 
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &Context) -> Poll<Self::Output, Self::Effect> {
-        use Poll::*;
-
         match self.project().0.poll(cx) {
-            Done(v) => Done(v),
-            Effect(e) => Effect(e.embed()),
-            Pending => Pending,
+            Poll::Event(Event::Complete(v)) => Poll::Event(Event::Complete(v)),
+            Poll::Event(Event::Effect(e)) => Poll::Event(Event::Effect(e.embed())),
+            Poll::Pending => Poll::Pending,
         }
     }
 }

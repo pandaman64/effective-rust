@@ -102,11 +102,11 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         // into
         // ```
         // match <poll_expr> {
-        //     Done(<value_pattern>) => <value_body>,
-        //     Effect(A(<eff1>, <k1>) => <eff_body1>,
+        //     Event(Complete(<value_pattern>)) => <value_body>,
+        //     Event(Effect((A(<eff1>, <k1>)) => <eff_body1>,
         //     ...
-        //     Effect(B(B(...B(A(<effN>, <kN>))...))) => <eff_bodyN>,
-        //     Effect(B(B(...B(B(__rest))...))) => reperform_rest!(__rest),
+        //     Event(Effect(B(B(...B(A(<effN>, <kN>))...)))) => <eff_bodyN>,
+        //     Event(Effect(B(B(...B(B(__rest))...)))) => reperform_rest!(__rest),
         //     Pending => yield Pending,
         // }
         // ```
@@ -117,13 +117,13 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         );
         {
             let pat = m.arms[0].pat.clone();
-            m.arms[0].pat =
-                syn::parse2(quote! { eff::Poll::Done(#pat) }).expect("value pattern is invalid");
+            m.arms[0].pat = syn::parse2(quote! { eff::Poll::Event(eff::Event::Complete(#pat)) })
+                .expect("value pattern is invalid");
         }
         for (idx, ref mut arm) in m.arms[1..].iter_mut().enumerate() {
             let pat = arm.pat.clone();
             let wrapped = wrap_pattern(quote! { eff::coproduct::Either::A #pat }, idx);
-            arm.pat = syn::parse2(quote! { eff::Poll::Effect(#wrapped) })
+            arm.pat = syn::parse2(quote! { eff::Poll::Event(eff::Event::Effect(#wrapped)) })
                 .expect(&format!("{}'th pattern({:?}) is invalid", idx, pat));
         }
         {
@@ -132,14 +132,14 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
             // allow unreachable as there can be no remaining effects
             m.arms.push(
                 syn::parse2(quote! {
-                    #[allow(unreachable_code)] eff::Poll::Effect(#wrapped) => eff::reperform_rest!(#ident),
+                    #[allow(unreachable_code)] eff::Poll::Event(eff::Event::Effect(#wrapped)) => eff::reperform_rest!(#ident),
                 })
                 .expect("reperform arm is invalid"),
             );
         }
         m.arms.push(
             syn::parse2(quote! {
-                eff::Poll::Pending => yield eff::Suspension::Pending,
+                eff::Poll::Pending => yield eff::Poll::Pending,
             })
             .expect("pending arm is invalid"),
         );

@@ -114,7 +114,7 @@ fn test_pipe() {
     let context = Context::from_notify(Arc::new(DoNothingNotify));
 
     match tee.poll(&context) {
-        Poll::Done(6) => {}
+        Poll::Event(Event::Complete(6)) => {}
         x => panic!("invalid output: {:?}", x),
     }
 }

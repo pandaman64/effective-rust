@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task;
 
-use crate::{Effect, Effectful};
+use crate::{Effect, Effectful, Event};
 
 #[derive(Debug)]
 pub struct Item<T>(T);
@@ -38,8 +38,8 @@ where
         let cx = crate::Context::from_notify(notify);
         let comp = self.project().0;
         match comp.poll(&cx) {
-            crate::Poll::Done(()) => task::Poll::Ready(None),
-            crate::Poll::Effect(e) => task::Poll::Ready(Some(e)),
+            crate::Poll::Event(Event::Complete(())) => task::Poll::Ready(None),
+            crate::Poll::Event(Event::Effect(e)) => task::Poll::Ready(Some(e)),
             crate::Poll::Pending => task::Poll::Pending,
         }
     }
@@ -65,8 +65,8 @@ where
         let mut cx = task::Context::from_waker(&waker);
         let stream = self.project().0;
         match stream.poll_next(&mut cx) {
-            task::Poll::Ready(Some(v)) => crate::Poll::Effect(Item(v)),
-            task::Poll::Ready(None) => crate::Poll::Done(()),
+            task::Poll::Ready(Some(v)) => crate::Poll::effect(Item(v)),
+            task::Poll::Ready(None) => crate::Poll::complete(()),
             task::Poll::Pending => crate::Poll::Pending,
         }
     }

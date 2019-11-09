@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task;
 
-use crate::Effectful;
+use crate::{Effectful, Event};
 
 /// A future that resolves the underlying computation on `poll`.
 /// The computation cannot have any effects to be converted into a future.
@@ -27,9 +27,9 @@ where
         let cx = crate::Context::from_notify(notify);
         let comp = self.project().0;
         match comp.poll(&cx) {
-            crate::Poll::Done(v) => task::Poll::Ready(v),
+            crate::Poll::Event(Event::Complete(v)) => task::Poll::Ready(v),
             crate::Poll::Pending => task::Poll::Pending,
-            crate::Poll::Effect(_) => unreachable!(),
+            crate::Poll::Event(Event::Effect(never)) => never,
         }
     }
 }
@@ -51,7 +51,7 @@ where
         let mut cx = task::Context::from_waker(&waker);
         let fut = self.project().0;
         match fut.poll(&mut cx) {
-            task::Poll::Ready(v) => crate::Poll::Done(v),
+            task::Poll::Ready(v) => crate::Poll::complete(v),
             task::Poll::Pending => crate::Poll::Pending,
         }
     }
