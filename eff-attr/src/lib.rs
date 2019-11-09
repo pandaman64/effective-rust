@@ -125,7 +125,7 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
             let pat = arm.pat.clone();
             let wrapped = wrap_pattern(quote! { eff::coproduct::Either::A #pat }, idx);
             arm.pat = syn::parse2(quote! { eff::Event::Effect(#wrapped) })
-                .expect(&format!("{}'th pattern({:?}) is invalid", idx, pat));
+                .expect(&format!("{}'th pattern is invalid", idx));
         }
         {
             let ident = quote! { __rest };
