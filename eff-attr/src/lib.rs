@@ -1,7 +1,9 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
+use proc_macro_hack::proc_macro_hack;
 use quote::{quote, ToTokens};
+use syn::parse::Parse;
 
 type TokenStream2 = proc_macro2::TokenStream;
 
@@ -10,7 +12,7 @@ enum CommaOrColon {
     Colon(syn::token::Colon),
 }
 
-impl syn::parse::Parse for CommaOrColon {
+impl Parse for CommaOrColon {
     fn parse(input: syn::parse::ParseStream) -> syn::parse::Result<Self> {
         if input.peek(syn::token::Comma) {
             input.parse().map(CommaOrColon::Comma)
@@ -102,12 +104,11 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         // into
         // ```
         // match <poll_expr> {
-        //     Event(Complete(<value_pattern>)) => <value_body>,
-        //     Event(Effect((A(<eff1>, <k1>)) => <eff_body1>,
+        //     Complete(<value_pattern>) => <value_body>,
+        //     Effect((A(<eff1>, <k1>) => <eff_body1>,
         //     ...
-        //     Event(Effect(B(B(...B(A(<effN>, <kN>))...)))) => <eff_bodyN>,
-        //     Event(Effect(B(B(...B(B(__rest))...)))) => reperform_rest!(__rest),
-        //     Pending => yield Pending,
+        //     Effect(B(B(...B(A(<effN>, <kN>))...))) => <eff_bodyN>,
+        //     Effect(B(B(...B(B(__rest))...))) => reperform_rest!(__rest),
         // }
         // ```
         // TODO: Currently, this macro doesn't support other forms such as if guards.
@@ -117,13 +118,13 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
         );
         {
             let pat = m.arms[0].pat.clone();
-            m.arms[0].pat = syn::parse2(quote! { eff::Poll::Event(eff::Event::Complete(#pat)) })
+            m.arms[0].pat = syn::parse2(quote! { eff::Event::Complete(#pat) })
                 .expect("value pattern is invalid");
         }
         for (idx, ref mut arm) in m.arms[1..].iter_mut().enumerate() {
             let pat = arm.pat.clone();
             let wrapped = wrap_pattern(quote! { eff::coproduct::Either::A #pat }, idx);
-            arm.pat = syn::parse2(quote! { eff::Poll::Event(eff::Event::Effect(#wrapped)) })
+            arm.pat = syn::parse2(quote! { eff::Event::Effect(#wrapped) })
                 .expect(&format!("{}'th pattern({:?}) is invalid", idx, pat));
         }
         {
@@ -132,19 +133,53 @@ pub fn eff(attr: TokenStream, item: TokenStream) -> TokenStream {
             // allow unreachable as there can be no remaining effects
             m.arms.push(
                 syn::parse2(quote! {
-                    #[allow(unreachable_code)] eff::Poll::Event(eff::Event::Effect(#wrapped)) => eff::reperform_rest!(#ident),
+                    #[allow(unreachable_code)] eff::Event::Effect(#wrapped) => eff::reperform_rest!(#ident),
                 })
                 .expect("reperform arm is invalid"),
             );
         }
-        m.arms.push(
-            syn::parse2(quote! {
-                eff::Poll::Pending => yield eff::Poll::Pending,
-            })
-            .expect("pending arm is invalid"),
-        );
         m.into_token_stream().into()
     } else {
         panic!("eff couldn't parse the content");
     }
+}
+
+#[proc_macro_hack]
+pub fn poll(input: TokenStream) -> TokenStream {
+    use syn::parse::Parser;
+    use syn::punctuated::Punctuated;
+
+    let parser = Punctuated::<syn::Expr, syn::token::Comma>::parse_terminated;
+    let exprs = parser.parse(input).expect("failed to parse input");
+
+    let mut ret = TokenStream2::new();
+    let names = exprs
+        .iter()
+        .enumerate()
+        .map(|(idx, expr)| {
+            let name = quote::format_ident!("__comp{}", idx);
+            ret.extend(quote! {
+                let mut #name = eff::Effectful::next_event(#expr);
+            });
+            name
+        })
+        .collect::<Vec<_>>();
+
+    ret.extend(quote! {
+        loop {
+            let mut __all_occured = true;
+
+            #(
+                if let eff::Poll::Pending = eff::poll_with_task_context(unsafe { eff::pin_reexport::Pin::new_unchecked(&mut #names) }) {
+                    __all_occured = false;
+                }
+            )*
+
+            if __all_occured {
+                break (#( unsafe { eff::pin_reexport::Pin::new_unchecked(&mut #names) }.take_event().unwrap() ),*);
+            }
+        }
+    });
+
+    quote!({ #ret }).into()
 }

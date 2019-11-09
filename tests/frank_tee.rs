@@ -37,18 +37,19 @@ fn tee<T: Clone, U>(
     pin_mut!(rx2);
 
     loop {
+        let (txe, rxe1, rxe2) = poll!(tx.as_mut(), rx1.as_mut(), rx2.as_mut());
         #[eff]
-        match poll_with_task_context(rx1.as_mut()) {
+        match rxe1 {
             v => return v,
             (Receive(_), recv1) =>
             {
                 #[eff]
-                match poll_with_task_context(rx2.as_mut()) {
+                match rxe2 {
                     v => return v,
                     (Receive(_), recv2) =>
                     {
                         #[eff]
-                        match poll_with_task_context(tx.as_mut()) {
+                        match txe {
                             () => perform!(Abort),
                             (Send(msg), send) => {
                                 send.waker().wake(());

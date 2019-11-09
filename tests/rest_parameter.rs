@@ -24,7 +24,7 @@ fn func<R>(comp: impl Effectful<Output = (), Effect = Coproduct![In: R]>) {
 
     loop {
         #[eff]
-        match poll_with_task_context(comp.as_mut()) {
+        match poll!(comp.as_mut()) {
             () => {
                 perform!(Out);
                 perform!(Out);

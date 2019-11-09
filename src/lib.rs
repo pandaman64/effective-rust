@@ -1,5 +1,6 @@
 #![feature(generator_trait, never_type, stmt_expr_attributes, proc_macro_hygiene)]
 
+use proc_macro_hack::proc_macro_hack;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -20,6 +21,7 @@ pub mod futures_compat;
 pub mod generator;
 pub mod handled;
 pub mod lazy;
+pub mod next_event;
 pub mod poll_fn;
 
 pub use context::{poll_with_task_context, Context, Notify, TypedContext, Waker};
@@ -29,6 +31,7 @@ pub use lazy::{lazy, pure};
 use either::Either;
 use embed::EmbedEffect;
 use handled::Handled;
+use next_event::NextEvent;
 
 /// A coproduct type of effects
 #[macro_export]
@@ -86,7 +89,7 @@ macro_rules! perform_from {
         $crate::pin_mut!(eff);
         loop {
             let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
-            match $crate::context::poll_with_task_context(eff) {
+            match $crate::poll_with_task_context(eff) {
                 $crate::Poll::Event($crate::Event::Complete(x)) => break x,
                 $crate::Poll::Event($crate::Event::Effect(e)) => {
                     // if the computation has no effects, this arm is unreachable
@@ -102,6 +105,10 @@ macro_rules! perform_from {
         }
     }};
 }
+
+#[proc_macro_hack]
+/// Poll the given computations concurrently
+pub use eff_attr::poll;
 
 #[doc(hidden)]
 #[macro_export]
@@ -320,6 +327,15 @@ pub trait Effectful {
                 Poll::Pending => thread::park(),    // park until wake
             }
         }
+    }
+
+    /// Create a computation which polls this until the first event occures.
+    #[inline]
+    fn next_event(self) -> NextEvent<Self>
+    where
+        Self: Sized,
+    {
+        next_event::NextEvent::Computation(self)
     }
 
     /// Resume the computation to a final value, registering the current task

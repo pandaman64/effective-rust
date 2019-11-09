@@ -33,7 +33,7 @@ fn run_state<S: Clone, T>(
 
     loop {
         #[eff]
-        match poll_with_task_context(comp.as_mut()) {
+        match poll!(comp.as_mut()) {
             x => return (init, x),
             (Get(_), k) => k.waker().wake(init.clone()),
             (Set(v), k) => {

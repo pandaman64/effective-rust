@@ -73,7 +73,7 @@ fn test_timer_effect() {
 
             loop {
                 #[eff]
-                match poll_with_task_context(comp.as_mut()) {
+                match poll!(comp.as_mut()) {
                     v => return v,
                     (Delay(instant), k) => {
                         let delay = handle.delay(instant);

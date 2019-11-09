@@ -36,12 +36,13 @@ fn pipe<T, U>(
 
     loop {
         // Not that good compared to Frank's simultaneous pattern-match
+        let (txe, rxe) = poll!(tx.as_mut(), rx.as_mut());
         #[eff]
-        match poll_with_task_context(tx.as_mut()) {
+        match txe {
             () =>
             {
                 #[eff]
-                match poll_with_task_context(rx.as_mut()) {
+                match rxe {
                     v => return v,
                     (_, _) => perform!(Abort),
                 }
@@ -49,7 +50,7 @@ fn pipe<T, U>(
             (Send(msg), send) =>
             {
                 #[eff]
-                match poll_with_task_context(rx.as_mut()) {
+                match rxe {
                     v => return v,
                     (Receive(_), recv) => {
                         send.waker().wake(());
