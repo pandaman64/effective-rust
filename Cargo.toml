@@ -16,7 +16,6 @@ futures-compat = ["futures"]
 
 [dependencies]
 eff-attr = "0.1.0"
-pin-utils = "0.1.0-alpha.4"
 crossbeam-channel = "0.4.0"
 pin-project = "0.4.5"
 futures = { version = "0.3.1", optional = true }
@@ -26,6 +25,7 @@ proc-macro-hack = "0.5.11"
 clap = "2.33.0"
 tokio = "0.2.0-alpha.6"
 tokio-timer = "0.3.0-alpha.6"
+pin-utils = "0.1.0-alpha.4"
 
 [workspace]
 members = [

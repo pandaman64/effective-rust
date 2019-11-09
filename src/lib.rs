@@ -8,8 +8,6 @@ use std::thread;
 
 pub use eff_attr::eff;
 #[doc(hidden)]
-pub use pin_utils::pin_mut;
-#[doc(hidden)]
 pub use std::pin as pin_reexport;
 
 pub mod context;
@@ -85,10 +83,9 @@ macro_rules! reperform_rest {
 #[macro_export]
 macro_rules! perform_from {
     ($eff:expr) => {{
-        let eff = $eff;
-        $crate::pin_mut!(eff);
+        let mut eff = $eff;
         loop {
-            let eff = $crate::pin_reexport::Pin::as_mut(&mut eff);
+            let eff = unsafe { $crate::pin_reexport::Pin::new_unchecked(&mut eff) };
             match $crate::poll_with_task_context(eff) {
                 $crate::Poll::Event($crate::Event::Complete(x)) => break x,
                 $crate::Poll::Event($crate::Event::Effect(e)) => {
@@ -299,7 +296,7 @@ pub trait Effectful {
     ///
     /// The effect type of this computation must be an empty set (never type) since there is no handler
     #[inline]
-    fn block_on(self) -> Self::Output
+    fn block_on(mut self) -> Self::Output
     where
         Self: Sized + Effectful<Effect = !>,
     {
@@ -313,15 +310,14 @@ pub trait Effectful {
             }
         }
 
-        let this = self;
-        pin_mut!(this);
+        let mut pinned = unsafe { Pin::new_unchecked(&mut self) };
 
         let cx = Context::from_notify(Arc::new(CurrentThreadNotify {
             thread: thread::current(),
         }));
 
         loop {
-            match this.as_mut().poll(&cx) {
+            match pinned.as_mut().poll(&cx) {
                 Poll::Event(Event::Complete(v)) => return v,
                 Poll::Event(Event::Effect(e)) => e, // unreachable
                 Poll::Pending => thread::park(),    // park until wake
